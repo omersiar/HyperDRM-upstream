@@ -6,7 +6,8 @@ Ambient Light for webOS, Hyperion and HyperHDR. An own webOS app and native ARM 
 
 ## Features
 
-- Spatial colors from 16 LG histogram regions with interpolated transitions along the screen perimeter.
+- Spatial colors from 16 LG histogram regions, rendered either as interpolated transitions along the screen perimeter or from measured region rectangles.
+- Histogram means and plane blends are computed in linear light, so a region that mixes two colors keeps the picture's brightness instead of dimming to an encoded average.
 - LED count, ordering and screen rectangles read from the receiver at startup and refreshed every five seconds without capture restart. No fixed 200-LED layout; layouts with 50 and 500 LEDs were tested.
 - Automatic detection of top/bottom black bars on the calibrated LG G4.
 - Bounded last-color hold on empty/failed histogram reads, real black detection and 500 ms source transitions using a raw receiver LED subscription.
@@ -54,7 +55,7 @@ Boot log: `/var/lib/webosbrew/histogramhyperion-boot.log`.
 Use an ARM EABI cross-compiler and Python 3:
 
 ```sh
-arm-linux-gnueabi-gcc -Wall -Wextra -Werror -O2 -rdynamic native/service.c -ldl -o service/histogram-service
+arm-linux-gnueabi-gcc -Wall -Wextra -Werror -O2 -rdynamic native/service.c -ldl -lm -o service/histogram-service
 python3 build_package.py
 python3 build_manifest.py
 ```
@@ -119,6 +120,12 @@ Auto PicCap uses the selected receiver IP and the separate **PicCap FlatBuffer p
 HyperHDR 22's JSON `color` handler ultimately registers only the first RGB triplet as a solid color. Version 0.8.1 uses JSON `image` output for the HyperHDR receiver selection. A cached 160x90 geometry interpolates the calibrated histogram samples into a synthetic color plane; HyperHDR applies its configured LED rectangles to that plane. The payload contains generated colors, not captured or decrypted video frames. HyperHDR's image processing and color calibration affect the resulting LED colors. Select a spatial image mapping mode in HyperHDR; a global single-color mapping mode will still give uniform LEDs.
 
 Hyperion retains its original per-LED color-array output. Receiver IP, JSON port, optional token, priority, timeout and reconnection behavior remain shared. Tests cover exact RGB base64 encoding, image command metadata and spatial edge variation. Output must be verified through the receiver's LED stream, not solely a successful command acknowledgment.
+
+A custom profile can render its samples as **region rectangles** instead of perimeter
+cones. The mode is chosen with **Geometry** in the TV calibration panel, survives
+recalibration and can be switched back for an A/B comparison; without imported
+rectangles one block per measured rim anchor is derived, and measured rectangle
+data always takes precedence. See [profiles/README.md](profiles/README.md).
 
 ## HyperHDR output for every LED hardware instance (unreleased)
 
@@ -266,6 +273,8 @@ receiver-output and simulated service-lifecycle tests with ASan/UBSan. These hos
 tests do not replace real LG capture and remote-control validation on a TV.
 
 Histogram near-black handling suppresses colors with a maximum RGB channel of 16 or less, gradually restores brightness between 16 and 32, and preserves brighter colors. This applies only to histogram output; PicCap, receiver calibration and raw calibration samples are unchanged.
+
+Histogram means and spatial blends are evaluated in linear light (IEC 61966-2-1) and encoded once for output. Averaging encoded values under-reports light: a region that straddles two colors reached the LEDs as a dim olive (125,110,35) instead of the bright mix the picture contains (169,147,38), so mixed regions looked darker than their neighbors. Mixed regions now keep the picture's luminance exactly. Conversions use lookup tables built on first use, so the render loop only does arithmetic.
 
 Thin letterbox detection compares both edges against lit interior histogram samples and requires a consistently dark upper edge for at least two seconds. Histogram probes cannot determine the exact bar height or guarantee detection on every scene.
 

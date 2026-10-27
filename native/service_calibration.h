@@ -91,7 +91,8 @@ static bool set_calibration(void *h, void *m, void *ctx) {
         return respond(
             h, m,
             "{\"returnValue\":false,\"errorText\":\"Select a valid profile; custom profiles need a "
-            "model and 2-16 sorted rim points (position 0-4, region 0-15)\"}");
+            "model and 2-16 sorted rim points (position 0-4, region 0-15). Optional rectangles "
+            "need region 0-15, x0<x1, y0<y1 inside 0-1, and no duplicate region\"}");
     if (!calibration_save(CALIBRATION_PREF, &next))
         return respond(h, m,
                        "{\"returnValue\":false,\"errorText\":\"Cannot save calibration profile\"}");

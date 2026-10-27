@@ -9,7 +9,8 @@ enum { SPATIAL_WIDTH = 160, SPATIAL_HEIGHT = 90, SPATIAL_PIXELS = SPATIAL_WIDTH 
 /* Synthetic color plane from histogram samples, never captured video pixels.
  * HyperHDR 22 treats JSON color as a solid color; image input retains space.
  * The receiver samples this plane using its configured LED rectangles, so one
- * plane serves every LED hardware instance. */
+ * plane serves every LED hardware instance. Pixels come from the active spatial
+ * model: measured region rectangles, or perimeter rim interpolation. */
 static const LedBlend *spatial_blends(void) {
     static LedBlend blends[SPATIAL_PIXELS];
     static unsigned generation;
@@ -17,7 +18,7 @@ static const LedBlend *spatial_blends(void) {
         for (unsigned y = 0; y < SPATIAL_HEIGHT; y++)
             for (unsigned x = 0; x < SPATIAL_WIDTH; x++)
                 blends[y * SPATIAL_WIDTH + x] =
-                    layout_blend((x + 0.5) / SPATIAL_WIDTH, (y + 0.5) / SPATIAL_HEIGHT);
+                    layout_point_blend((x + 0.5) / SPATIAL_WIDTH, (y + 0.5) / SPATIAL_HEIGHT);
         generation = calibration_generation;
     }
     return blends;

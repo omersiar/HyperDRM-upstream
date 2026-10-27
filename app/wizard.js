@@ -51,8 +51,20 @@ function wizardSample() {
             profile = 'custom';
             profileDirty = true;
             showProfile();
+            /* Keep the user's spatial geometry. A new point list replaces the
+             * measured rectangles, but the mode itself is a user choice. */
+            var stored = null;
+            try {
+                stored = JSON.parse(document.getElementById('customProfile').value);
+            } catch (e) {
+                stored = null;
+            }
+            if (stored && stored.geometry === 'rectangles') {
+                measured.geometry = 'rectangles';
+                if (stored.model === measured.model && stored.rectangles && stored.rectangles.length) measured.rectangles = stored.rectangles;
+            }
             document.getElementById('customProfile').value = JSON.stringify(measured, null, 2);
-            document.getElementById('wizardStatus').textContent = 'Measured ' + measured.points.length + ' edge regions. Select Save profile, then Validate profile to check all four colored edges. The previous saved profile is still active.';
+            document.getElementById('wizardStatus').textContent = 'Measured ' + measured.points.length + ' edge regions' + (measured.geometry === 'rectangles' ? ' with region rectangles' : '') + '. Select Save profile, then Validate profile to check all four colored edges. The previous saved profile is still active.';
             wizard.busy = true;
             wizard.phase = WizardPhase.COMMITTING;
             call('calibrationDraft', function(r) {

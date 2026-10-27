@@ -39,6 +39,50 @@ static LedBlend layout_blend(double x, double y) {
     return (LedBlend){rim[left].region, rim[right].region,
                       (unsigned)(distance / span * 65535 + 0.5)};
 }
+/* Rectangle geometry: LG reports each region as the mean of the pixels inside
+ * its own sampling rectangle, so a pixel covered by several rectangles is the
+ * 1/area weighted mix of them - a small, local rectangle describes that pixel
+ * better than a large nested one. Pixels outside every rectangle use the
+ * nearest measured centre. Imported rectangles win over derived edge blocks. */
+static LedBlend layout_rectangle_blend(double x, double y) {
+    unsigned count = 0;
+    const RegionRect *rects = calibration_blocks(&count);
+    unsigned char first = 0, second = 0, nearest = 0;
+    double weight_first = 0, weight_second = 0, closest = 0;
+    for (unsigned i = 0; i < count; i++) {
+        const RegionRect *r = &rects[i];
+        double dx = x - (r->x0 + r->x1) / 2, dy = y - (r->y0 + r->y1) / 2;
+        double distance = dx * dx + dy * dy;
+        if (!i || distance < closest) {
+            closest = distance;
+            nearest = r->region;
+        }
+        if (x < r->x0 || x > r->x1 || y < r->y0 || y > r->y1)
+            continue;
+        double weight = 1.0 / ((r->x1 - r->x0) * (r->y1 - r->y0));
+        if (weight > weight_first) {
+            weight_second = weight_first;
+            second = first;
+            weight_first = weight;
+            first = r->region;
+        } else if (weight > weight_second) {
+            weight_second = weight;
+            second = r->region;
+        }
+    }
+    if (!weight_first)
+        return (LedBlend){nearest, nearest, 0};
+    if (!weight_second || second == first)
+        return (LedBlend){first, first, 0};
+    return (LedBlend){first, second,
+                      (unsigned)(weight_second / (weight_first + weight_second) * 65535 + 0.5)};
+}
+/* Active spatial model: measured rectangles when a custom profile opts in,
+ * otherwise the perimeter rim interpolation. Both produce one LedBlend per
+ * point, so the plane and the receiver LED mapping share the same geometry. */
+static inline LedBlend layout_point_blend(double x, double y) {
+    return calibration_rectangles() ? layout_rectangle_blend(x, y) : layout_blend(x, y);
+}
 /* Use the TV's JSON-C library; validate every rectangle before replacing the
  * layout. The safety limit is independent of the installed LED count. */
 static bool layout_from_json(const char *text, LedBlend **result, unsigned *count) {
@@ -79,8 +123,8 @@ static bool layout_from_json(const char *text, LedBlend **result, unsigned *coun
         if (valid)
             valid = coordinates[0] <= coordinates[1] && coordinates[2] <= coordinates[3];
         if (valid)
-            mapping[i] = layout_blend((coordinates[0] + coordinates[1]) / 2,
-                                      (coordinates[2] + coordinates[3]) / 2);
+            mapping[i] = layout_point_blend((coordinates[0] + coordinates[1]) / 2,
+                                            (coordinates[2] + coordinates[3]) / 2);
     }
     if (root)
         put(root);

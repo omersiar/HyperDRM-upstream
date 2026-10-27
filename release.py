@@ -84,7 +84,7 @@ def main():
                   'native/test_' + name + '.c', '-ldl', '-lm', '-o', destination)
             linux(destination)
     linux('arm-linux-gnueabi-gcc', '-Wall', '-Wextra', '-Werror', '-O2', '-rdynamic',
-          'native/service.c', '-ldl', '-o', 'service/histogram-service')
+          'native/service.c', '-ldl', '-lm', '-o', 'service/histogram-service')
     run(sys.executable, 'build_package.py')
     run(sys.executable, 'build_manifest.py')
     verify_package(version)

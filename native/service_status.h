@@ -1,7 +1,7 @@
 /* Read-only runtime status serialization. */
 static bool status(void *h, void *m, void *ctx) {
     (void)ctx;
-    char json[8192], safe[512], endpoint[80];
+    char json[12288], safe[512], endpoint[80];
     size_t n = 0;
     snprintf(endpoint, sizeof(endpoint), strchr(target.host, ':') ? "[%s]:%u" : "%s:%u",
              target.host, target.port);
@@ -24,6 +24,9 @@ static bool status(void *h, void *m, void *ctx) {
             report[k++] = c;
     }
     report[k] = 0;
+    unsigned spatial_rectangles = 0;
+    if (calibration_rectangles())
+        calibration_blocks(&spatial_rectangles);
     int used = snprintf(
         json, sizeof(json),
         "{\"receiverConnecting\":%s,\"calibrationProfile\":\"%s\",\"effectiveCalibration\":\"%s\","
@@ -34,11 +37,22 @@ static bool status(void *h, void *m, void *ctx) {
         used +=
             snprintf(json + used, sizeof(json) - used, "%s{\"position\":%.12g,\"region\":%u}",
                      i ? "," : "", calibration.points[i].position, calibration.points[i].region);
-    used += snprintf(json + used, sizeof(json) - used,
-                     "],\"layoutUpdates\":%u,\"lastLayoutCheckAgeMs\":%lld,\"layoutError\":\"%s\","
+    used += snprintf(json + used, sizeof(json) - used, "],\"customRectangles\":[");
+    for (unsigned i = 0; i < calibration.rect_count && used + 96 < (int)sizeof(json); i++)
+        used += snprintf(json + used, sizeof(json) - used,
+                         "%s{\"region\":%u,\"x0\":%.6g,\"y0\":%.6g,\"x1\":%.6g,\"y1\":%.6g}",
+                         i ? "," : "", calibration.rects[i].region, calibration.rects[i].x0,
+                         calibration.rects[i].y0, calibration.rects[i].x1, calibration.rects[i].y1);
+    used += snprintf(json + used, sizeof(json) - used, "],\"customRectangleCount\":%u,\"spatialRectangleCount\":%u,"
+                                                             "\"customGeometry\":\"%s\","
+                     "\"spatialGeometry\":\"%s\",\"layoutUpdates\":%u,"
+                     "\"lastLayoutCheckAgeMs\":%lld,\"layoutError\":\"%s\","
                      "\"piccapFallbacks\":%u,\"piccapCooldownMs\":%llu,",
-                     layout_updates, last_layout_check ? (long long)(now - last_layout_check) : -1,
-                     layout_error, piccap_fallbacks,
+                     calibration.rect_count, spatial_rectangles,
+                     calibration.rect_geometry ? "rectangles" : "rim",
+                     calibration_rectangles() ? "rectangles" : "rim", layout_updates,
+                     last_layout_check ? (long long)(now - last_layout_check) : -1, layout_error,
+                     piccap_fallbacks,
                      (unsigned long long)(handover_cooldown > now ? handover_cooldown - now : 0));
     used += snprintf(json + used, sizeof(json) - used, "\"calibrationMessage\":\"%s\",", report);
     used += snprintf(json + used, sizeof(json) - used,
