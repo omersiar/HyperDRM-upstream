@@ -34,6 +34,14 @@ int main(void){
  }
  assert(target_save(file,&t));struct stat st;assert(stat(file,&st)==0 && (st.st_mode&0777)==0600);
  TargetConfig restored=target;assert(target_load(&j,file,&restored));assert(restored.capture_interval==100);assert(!strcmp(restored.host,"::1") && restored.port==65535 && !strcmp(restored.token,"test-token"));
+ /* Output transport: JSON addresses one HyperHDR instance, FlatBuffer reaches all. */
+ assert(!strcmp(restored.output,"json") && !target_flatbuffer(&restored));
+ assert(target_parse(&j,"{\"host\":\"::1\",\"port\":65535,\"receiver\":\"HyperHDR\",\"output\":\"flatbuffer\"}",&restored));
+ assert(!strcmp(restored.output,"flatbuffer") && target_flatbuffer(&restored));
+ assert(target_save(file,&restored));{TargetConfig reloaded=target;assert(target_load(&j,file,&reloaded) && target_flatbuffer(&reloaded));}
+ {TargetConfig before=restored;assert(!target_parse(&j,"{\"host\":\"::1\",\"port\":65535,\"receiver\":\"HyperHDR\",\"output\":\"flatbuffers\"}",&restored));assert(!memcmp(&before,&restored,sizeof(restored)));}
+ strcpy(restored.receiver,"Hyperion");assert(!target_flatbuffer(&restored));
+ strcpy(restored.receiver,"HyperHDR");assert(target_flatbuffer(&restored));
  assert(target_parse(&j,"{\"host\":\"127.0.0.1\",\"port\":19444,\"receiver\":\"HyperHDR\",\"clearToken\":true}",&t));assert(!t.token[0]);assert(target_piccap_local(&t));unlink(file);
  int server=socket(AF_INET,SOCK_STREAM,0);assert(server>=0);struct sockaddr_in a={.sin_family=AF_INET,.sin_addr={htonl(INADDR_LOOPBACK)}};
  assert(bind(server,(void*)&a,sizeof(a))==0 && listen(server,1)==0);socklen_t length=sizeof(a);assert(getsockname(server,(void*)&a,&length)==0);t.port=ntohs(a.sin_port);

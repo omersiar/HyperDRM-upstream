@@ -31,7 +31,8 @@ function clearActionError() {
     showActionError('');
 }
 var targetDirty = false,
-    receiver = 'Hyperion';
+    receiver = 'Hyperion',
+    output = 'json';
 var profileDirty = false,
     profile = 'auto',
     advancedProfile = false;
@@ -128,6 +129,8 @@ function display(result) {
         document.getElementById('captureInterval').value = result.captureIntervalMs || 50;
         receiver = result.receiver;
         document.getElementById('receiver').textContent = 'Receiver: ' + receiver;
+        output = result.output || 'json';
+        document.getElementById('output').textContent = 'Output: ' + (output === 'flatbuffer' ? 'FlatBuffer, all instances' : 'JSON, one instance');
     }
     document.getElementById('token').placeholder = result.tokenSet ? 'Saved token (leave blank to keep)' : 'No token saved';
     if (result.endpoint) document.getElementById('endpoint').textContent = result.receiver + ' · ' + result.endpoint + ' · Priority 149 · 10 updates per second';
@@ -156,6 +159,7 @@ function display(result) {
     if (result.piccapHandover && !result.piccapTargetCompatible) document.getElementById('status').textContent += ' · Auto PicCap unavailable for remote IPv6 target';
     if (result.colorValid && result.effectiveCalibration === 'average') document.getElementById('status').textContent += ' · Average color output';
     if (result.colorValid) document.getElementById('status').textContent += result.spatialOutput ? ' · ' + result.ledCount + ' LEDs from 16 color regions' + (result.receiver === 'HyperHDR' ? ' · Spatial image output' : '') : ' · Output RGB: ' + result.outputColor.join(', ');
+    if (result.output === 'flatbuffer') document.getElementById('status').textContent += result.flatbufferConnected ? ' · FlatBuffer connected, every LED instance' : ' · FlatBuffer connecting';
     else if (result.returnValue !== false) document.getElementById('status').textContent += ' · No current color output';
     if (result.blackBarDetection && result.running) document.getElementById('status').textContent += result.letterboxDetected ? ' · Top/bottom black bars detected' : ' · Full-screen capture';
     if (result.spatialInterpolation) document.getElementById('status').textContent += ' · Smooth color transitions';
@@ -309,6 +313,11 @@ document.getElementById('receiver').onclick = function() {
     this.textContent = 'Receiver: ' + receiver;
     targetDirty = true;
 };
+document.getElementById('output').onclick = function() {
+    output = output === 'flatbuffer' ? 'json' : 'flatbuffer';
+    this.textContent = 'Output: ' + (output === 'flatbuffer' ? 'FlatBuffer, all instances' : 'JSON, one instance');
+    targetDirty = true;
+};
 document.getElementById('saveTarget').onclick = function() {
     var port = Number(document.getElementById('port').value),
         button = this;
@@ -332,6 +341,7 @@ document.getElementById('saveTarget').onclick = function() {
         host: document.getElementById('host').value.trim(),
         port: port,
         receiver: receiver,
+        output: output,
         clearToken: document.getElementById('clearToken').checked
     };
     var token = document.getElementById('token').value.trim();
@@ -400,6 +410,6 @@ document.getElementById('editProfile').onclick = function() {
     showProfile();
     if (advancedProfile) document.getElementById('customProfileField').focus();
 };
-setupRemoteNavigation(['overviewTab', 'receiverTab', 'calibrationTab', 'reloadService', 'grantRoot', 'start', 'stop', 'refresh', 'autostart', 'handover', 'calibrationShortcut', 'receiver', 'hostField', 'portField', 'piccapPortField', 'captureIntervalField', 'tokenField', 'clearToken', 'saveTarget', 'testConnection', 'calibrate', 'validateCalibration', 'profile', 'saveProfile', 'editProfile', 'customProfileField', 'cancelCalibration'].map(function(id) {
+setupRemoteNavigation(['overviewTab', 'receiverTab', 'calibrationTab', 'reloadService', 'grantRoot', 'start', 'stop', 'refresh', 'autostart', 'handover', 'calibrationShortcut', 'receiver', 'output', 'hostField', 'portField', 'piccapPortField', 'captureIntervalField', 'tokenField', 'clearToken', 'saveTarget', 'testConnection', 'calibrate', 'validateCalibration', 'profile', 'saveProfile', 'editProfile', 'customProfileField', 'cancelCalibration'].map(function(id) {
     return document.getElementById(id);
 }), document, window);

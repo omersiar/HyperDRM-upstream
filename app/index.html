@@ -32,8 +32,8 @@ nav{border-bottom:1px solid #456185;padding-bottom:10px;margin-bottom:18px}nav b
 <p><small>Adjust brightness, saturation and normal smoothing in Hyperion or HyperHDR.</small></p><small id="diagnostics"></small>
 </section>
 <section id="receiverPanel" aria-label="Receiver settings" style="display:none">
-<fieldset><legend>Receiver connection</legend><button id="receiver">Receiver: Hyperion</button>
-<p><small>Select a field with the arrow buttons. Press OK or click to open the TV keyboard.</small></p>
+<fieldset><legend>Receiver connection</legend><button id="receiver">Receiver: Hyperion</button><button id="output">Output: JSON</button>
+<p><small>JSON addresses one HyperHDR LED hardware instance per connection. FlatBuffer sends one plane that HyperHDR fans out to every running instance, so extra instances light up too. It needs the receiver's FlatBuffer server.</small></p>
 <div class="fields">
 <div id="hostField" class="field" tabindex="0" role="button" aria-label="IP address, press OK to edit"><label>IP address<input id="host" tabindex="-1" readonly type="text" maxlength="45" value="127.0.0.1" spellcheck="false"></label></div>
 <div id="portField" class="field narrow" tabindex="0" role="button" aria-label="JSON port, press OK to edit"><label>JSON port<input id="port" tabindex="-1" readonly type="number" min="1" max="65535" value="19444"></label></div>

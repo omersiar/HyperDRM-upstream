@@ -79,13 +79,17 @@ static bool status(void *h, void *m, void *ctx) {
         "\"version\":\"" HYPERDRM_VERSION
         "\",\"running\":%s,\"colorValid\":%s,\"frames\":%lu,\"captureRecoveries\":%u,"
         "\"lastRecoveryMs\":%llu,\"endpoint\":\"%s\",\"host\":\"%s\",\"port\":%u,"
-        "\"receiver\":\"%s\",\"tokenSet\":%s,\"piccapTargetCompatible\":%s,"
+        "\"receiver\":\"%s\",\"output\":\"%s\",\"flatbufferConnected\":%s,"
+        "\"tokenSet\":%s,\"piccapTargetCompatible\":%s,"
         "\"priority\":%d,\"uid\":%u,\"drmVerified\":false,\"mappingVerified\":false,"
         "\"outputColor\":[%u,%u,%u],\"error\":\"%s\",\"regions\":[",
         (capture_ctx.handle || capture_source == SOURCE_PICCAP) ? "true" : "false",
         capture_ctx.color_valid ? "true" : "false", capture_ctx.frames, capture_ctx.recoveries,
         (unsigned long long)capture_ctx.last_recovery_ms, endpoint, target.host, target.port,
-        target.receiver, target.token[0] ? "true" : "false",
+        target.receiver, target.output,
+        target_flatbuffer(&target) && receiver_runtime.flatbuffer.stage == FB_READY ? "true"
+                                                                                   : "false",
+        target.token[0] ? "true" : "false",
         target_piccap_compatible(&target) ? "true" : "false", PRIORITY, (unsigned)geteuid(),
         capture_ctx.sent_rgb[0], capture_ctx.sent_rgb[1], capture_ctx.sent_rgb[2], safe);
     for (int i = 0; i < 16; i++)

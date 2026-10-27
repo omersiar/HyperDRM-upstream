@@ -104,7 +104,7 @@ LG may revoke histogram capture during playback transitions. From 0.7.1, HyperDR
 
 ## Hyperion and HyperHDR receiver settings
 
-Choose **Receiver: Hyperion/HyperHDR**, enter an IPv4 or IPv6 address and the JSON TCP port, then select **Save receiver**. Hyperion uses per-LED JSON color arrays; HyperHDR uses a synthetic spatial RGB image because HyperHDR 22 treats the color command as a solid color. Both use clear and serverinfo. Use the JSON port (usually 19444), not the FlatBuffer port (usually 19400) or web interface port. Numeric IP addresses are supported; hostnames and scoped IPv6 addresses are not currently accepted. Layout and LED count come from the selected receiver, including remote receivers.
+Choose **Receiver: Hyperion/HyperHDR**, enter an IPv4 or IPv6 address and the JSON TCP port, then select **Save receiver**. Hyperion uses per-LED JSON color arrays; HyperHDR uses a synthetic spatial RGB image because HyperHDR 22 treats the color command as a solid color. Both use clear and serverinfo. Use the JSON port (usually 19444), not the FlatBuffer port (usually 19400) or web interface port; the FlatBuffer transport option uses that FlatBuffer port instead. Numeric IP addresses are supported; hostnames and scoped IPv6 addresses are not currently accepted. Layout and LED count come from the selected receiver, including remote receivers.
 
 Settings are saved in `target.json` inside the own service container and loaded after service restart/boot. Saving valid settings switches a running session to the new receiver and clears the own priority at the old receiver. Invalid settings leave the current target intact. Saving while manually stopped does not start a session. Uninstalling removes the saved settings with the container.
 
@@ -119,6 +119,37 @@ Auto PicCap uses the selected receiver IP and the separate **PicCap FlatBuffer p
 HyperHDR 22's JSON `color` handler ultimately registers only the first RGB triplet as a solid color. Version 0.8.1 uses JSON `image` output for the HyperHDR receiver selection. A cached 160x90 geometry interpolates the calibrated histogram samples into a synthetic color plane; HyperHDR applies its configured LED rectangles to that plane. The payload contains generated colors, not captured or decrypted video frames. HyperHDR's image processing and color calibration affect the resulting LED colors. Select a spatial image mapping mode in HyperHDR; a global single-color mapping mode will still give uniform LEDs.
 
 Hyperion retains its original per-LED color-array output. Receiver IP, JSON port, optional token, priority, timeout and reconnection behavior remain shared. Tests cover exact RGB base64 encoding, image command metadata and spatial edge variation. Output must be verified through the receiver's LED stream, not solely a successful command acknowledgment.
+
+## HyperHDR output for every LED hardware instance (unreleased)
+
+HyperHDR runs one pipeline per LED hardware instance, and its JSON API binds an
+instance to the connection: `color`, `image` and `clear` act on the instance that
+connection selected, and the schema rejects a per-command `instance` field. A
+second instance therefore never received HyperDRM colors; only the first one did.
+
+Select **Output: FlatBuffer, all instances** and save. HyperDRM then sends the
+same 160x90 synthetic plane to HyperHDR's FlatBuffer server (the **PicCap
+FlatBuffer port**, default 19400) instead of the JSON port. A Register request
+declares origin `HyperDRM` and priority 149. HyperHDR decodes each plane once and
+broadcasts it through `GlobalSignals::SignalSetGlobalImage` to every running
+instance, so every LED hardware instance follows the histogram from a single
+connection. Keep the receiver's FlatBuffer server enabled; PicCap and HyperDRM
+can share it because only one of them sends at a time.
+
+**Output: JSON** keeps the previous behavior, including API-token authentication,
+`tan` transaction matching and the LED layout probe. FlatBuffer traffic carries
+no token and is restricted by HyperHDR's own network-origin rules. Both outputs
+use priority 149 with a 1.5 s duration, so the receiver lists one input per
+instance and falls back when HyperDRM stops; a disconnect also clears the
+priority server side. Auto PicCap keeps its JSON fade, which addresses the first
+instance only, while PicCap's own FlatBuffer stream covers every instance during
+a handover.
+
+`native/test_flatbuffer.c` validates the request layout (alignment, vtables, union
+tags and the image plane) and `native/test_flatbuffer_output.c` validates framing,
+registration, newest-frame coalescing and server error propagation. The wire
+format was accepted by a live HyperHDR 22 FlatBuffer server at an invisible test
+priority; per-instance LED output still needs verification on the TV.
 
 ## Diagnostics and connection test (0.9.0)
 

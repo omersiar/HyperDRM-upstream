@@ -33,9 +33,9 @@ static bool start(void *h, void *m, void *ctx) {
     if (receiver_runtime.starting)
         return respond(h, m, "{\"returnValue\":true,\"connecting\":true}");
     receiver_runtime.clear_pending = false;
-    if (!output_begin(&receiver_runtime.output, &target, milliseconds())) {
-        set_error(receiver_runtime.output.error);
-        return start_failure(h, m, receiver_runtime.output.error);
+    if (!receiver_begin(milliseconds())) {
+        set_error(receiver_error());
+        return start_failure(h, m, receiver_error());
     }
     receiver_runtime.starting = true;
     return respond(h, m, "{\"returnValue\":true,\"connecting\":true}");
@@ -88,8 +88,8 @@ static bool stop(void *h, void *m, void *ctx) {
     bridge_phase = BRIDGE_IDLE;
     memset(&capture_ctx.continuity, 0, sizeof(capture_ctx.continuity));
     stop_capture();
-    if (bridging && receiver_runtime.output.stage != OUTPUT_READY) {
-        output_begin(&receiver_runtime.output, &target, milliseconds());
+    if (bridging && !receiver_ready()) {
+        receiver_begin(milliseconds());
         receiver_runtime.clear_pending = true;
     }
     return respond(h, m, "{\"returnValue\":true,\"running\":false}");

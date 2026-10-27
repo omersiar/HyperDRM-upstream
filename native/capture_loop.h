@@ -2,34 +2,33 @@
 static int tick(void *unused) {
     (void)unused;
     uint64_t now = milliseconds();
-    unsigned long acknowledged = receiver_runtime.output.acknowledgements;
-    output_tick(&receiver_runtime.output, &playback_json, now);
-    if (receiver_runtime.output.stage == OUTPUT_FAILED &&
-        (capture_ctx.handle || receiver_runtime.starting)) {
+    unsigned long acknowledged = receiver_frames();
+    receiver_tick(&playback_json, now);
+    if (receiver_failed() && (capture_ctx.handle || receiver_runtime.starting)) {
         char error[128];
-        snprintf(error, sizeof(error), "%s", receiver_runtime.output.error);
+        snprintf(error, sizeof(error), "%s", receiver_error());
         release_capture(false);
         set_error(error);
         retry_update(&retries, boot_enabled() && geteuid() == 0, false, now);
         retry_failure(&retries, now);
     }
-    if (receiver_runtime.output.stage == OUTPUT_FAILED && receiver_runtime.clear_pending) {
+    if (receiver_failed() && receiver_runtime.clear_pending) {
         receiver_runtime.clear_pending = false;
-        output_close(&receiver_runtime.output);
+        receiver_close();
     }
     if (receiver_runtime.starting && (piccap_owned || capture_source != SOURCE_HISTOGRAM)) {
         receiver_runtime.starting = false;
-        output_close(&receiver_runtime.output);
+        receiver_close();
     }
-    if (receiver_runtime.output.acknowledgements > acknowledged && capture_ctx.handle) {
-        capture_ctx.frames += receiver_runtime.output.acknowledgements - acknowledged;
+    if (receiver_frames() > acknowledged && capture_ctx.handle) {
+        capture_ctx.frames += receiver_frames() - acknowledged;
         capture_ctx.last_output_at = now;
         last_error[0] = 0;
     }
-    if (receiver_runtime.clear_pending && receiver_runtime.output.stage == OUTPUT_READY) {
+    if (receiver_runtime.clear_pending && receiver_ready()) {
         receiver_runtime.clear_pending = false;
-        output_stop(&receiver_runtime.output, now, true);
-    } else if (receiver_runtime.starting && receiver_runtime.output.stage == OUTPUT_READY) {
+        receiver_stop(now, true);
+    } else if (receiver_runtime.starting && receiver_ready()) {
         free(receiver_layout.blends);
         receiver_layout.blends = receiver_runtime.output.mapping;
         receiver_runtime.output.mapping = NULL;
@@ -49,8 +48,7 @@ static int tick(void *unused) {
     if (owned)
         return 1;
     if (!capture_ctx.handle) {
-        if (receiver_runtime.starting || receiver_runtime.clear_pending ||
-            receiver_runtime.output.closing)
+        if (receiver_runtime.starting || receiver_runtime.clear_pending || receiver_closing())
             return 1;
         retry_update(&retries, boot_enabled() && geteuid() == 0, false, milliseconds());
         if (retry_take(&retries, milliseconds())) {
@@ -97,15 +95,17 @@ static int tick(void *unused) {
             retry_source_transition(&retries, now);
             return 1;
         }
-        char *line = region_command(held, receiver_layout.blends, receiver_layout.count,
-                                    (unsigned)(1500 - (now - capture_ctx.continuity.missing_at)));
-        if (!line || (!output_frame(&receiver_runtime.output, line))) {
-            free(line);
+        unsigned hold_duration =
+            (unsigned)(1500 - (now - capture_ctx.continuity.missing_at));
+        OutputFrame frame =
+            frame_build(held, receiver_layout.blends, receiver_layout.count, hold_duration);
+        bool failed = !frame_send(&frame, hold_duration, now);
+        frame_release(&frame);
+        if (failed) {
             set_error("Receiver connection lost while holding colors");
             stop_capture();
             return 1;
         }
-        free(line);
         return 1;
     }
     capture_ctx.sample_at = now;
@@ -165,14 +165,9 @@ static int tick(void *unused) {
         dark_color_filter(mapped_rgb[i]);
     continuity_frame(&capture_ctx.continuity, true, mapped_rgb, now, stable_rgb);
     receiver_layout.interpolation = receiver_layout.count && calibration_effective() != CAL_AVERAGE;
-    char *line = region_command(stable_rgb, receiver_layout.blends, receiver_layout.count, 1500);
-    if (!line) {
-        set_error("Color buffer allocation failed");
-        stop_capture();
-        return 1;
-    }
-    int failed = (!output_frame(&receiver_runtime.output, line));
-    free(line);
+    OutputFrame frame = frame_build(stable_rgb, receiver_layout.blends, receiver_layout.count, 1500);
+    int failed = !frame_send(&frame, 1500, now);
+    frame_release(&frame);
     if (failed) {
         set_error("Receiver connection lost");
         stop_capture();

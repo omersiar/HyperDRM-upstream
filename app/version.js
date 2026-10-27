@@ -1,2 +1,2 @@
 'use strict';
-var HYPERDRM_APP_VERSION = '0.13.4';
+var HYPERDRM_APP_VERSION = '0.14.0';

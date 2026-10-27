@@ -12,7 +12,10 @@ Formatting must preserve include order (`SortIncludes: Never`).
 | service_calibration.h | Bounded calibration lease, proposals, profiles, model discovery |
 | service_status.h | Read-only status serialization |
 | capture_loop.h | Scheduler, histogram acquisition, missing-data recovery and output |
+| frame_output.h | Transport selection between the JSON and FlatBuffer output paths |
 | receiver_output.h | Main asynchronous connection, transaction matching and frame coalescing |
+| flatbuffer.h | Back-to-front FlatBuffers writer for HyperHDR's Request schema |
+| flatbuffer_output.h | Length-prefixed FlatBuffer connection, registration, coalescing and clear |
 | atomic_file.h | Durable preference replacement and explicit commit outcomes |
 | service_context.h / runtime_context.h | Capture, receiver/layout and calibration session ownership |
 | receiver_stream.h | Independent, nonblocking receiver LED subscription |
@@ -25,6 +28,19 @@ Any connection, authorization or parsing failure closes the connection and
 schedules a bounded retry. Up to eight buffered messages are consumed per tick,
 including ticks where no new bytes arrive. Buffer capacity and read budgets remain
 bounded. LED count/profile changes trigger a fresh layout subscription.
+
+Output transport is chosen per target in target.h. Hyperion and HyperHDR with
+`output=json` use receiver_output.h: Idle → Connecting → (Login) → Layout →
+Ready, one in-flight transaction matched by `tan`, and one replaceable color
+frame. HyperHDR with `output=flatbuffer` uses flatbuffer_output.h instead:
+Connecting → Registering → Ready, length-prefixed big-endian frames, a Register
+request carrying origin `HyperDRM` and priority 149, then one RawImage plane per
+sample. The receiver decodes that plane once and broadcasts it through
+`GlobalSignals::SignalSetGlobalImage`, which every running LED hardware instance
+consumes, so one connection reaches all instances. The JSON API cannot: it binds
+an instance to a connection and rejects a per-command `instance` field. Reply
+error strings are parsed; a non-empty error fails the output. Disconnect clears
+the priority server side, and a stop still sends an explicit Clear.
 
 The color bridge uses Idle → Holding → WaitingFrame → Fading → Idle. It holds the
 last histogram frame while PicCap starts, clears its priority before observing a

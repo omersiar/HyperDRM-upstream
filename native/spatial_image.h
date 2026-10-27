@@ -8,9 +8,9 @@
 enum { SPATIAL_WIDTH = 160, SPATIAL_HEIGHT = 90, SPATIAL_PIXELS = SPATIAL_WIDTH * SPATIAL_HEIGHT };
 /* Synthetic color plane from histogram samples, never captured video pixels.
  * HyperHDR 22 treats JSON color as a solid color; image input retains space.
- * The receiver samples this plane using its configured LED rectangles. */
-static char *spatial_image_command_duration(const unsigned char regions[16][3], unsigned priority,
-                                            unsigned duration) {
+ * The receiver samples this plane using its configured LED rectangles, so one
+ * plane serves every LED hardware instance. */
+static const LedBlend *spatial_blends(void) {
     static LedBlend blends[SPATIAL_PIXELS];
     static unsigned generation;
     if (generation != calibration_generation) {
@@ -20,6 +20,25 @@ static char *spatial_image_command_duration(const unsigned char regions[16][3], 
                     layout_blend((x + 0.5) / SPATIAL_WIDTH, (y + 0.5) / SPATIAL_HEIGHT);
         generation = calibration_generation;
     }
+    return blends;
+}
+/* Raw RGB plane for the FlatBuffer transport (no base64, no JSON). */
+static void spatial_plane(const unsigned char regions[16][3], unsigned char *out) {
+    const LedBlend *blends = spatial_blends();
+    for (unsigned i = 0; i < SPATIAL_PIXELS; i++) {
+        unsigned char rgb[3], color[3];
+        LedBlend b = blends[i];
+        blend_color(regions[b.a], regions[b.b], b.weight, rgb);
+        boost_color(rgb, color);
+        out[i * 3] = color[0];
+        out[i * 3 + 1] = color[1];
+        out[i * 3 + 2] = color[2];
+    }
+}
+static char *spatial_image_command_duration(const unsigned char regions[16][3], unsigned priority,
+                                            unsigned duration) {
+    static unsigned char plane[SPATIAL_PIXELS * 3];
+    spatial_plane(regions, plane);
     const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t capacity = SPATIAL_PIXELS * 4 + 256;
     char *line = malloc(capacity);
@@ -31,10 +50,7 @@ static char *spatial_image_command_duration(const unsigned char regions[16][3], 
                            "\"name\":\"Histogram colors\",\"imagedata\":\"",
                            priority, duration, SPATIAL_WIDTH, SPATIAL_HEIGHT);
     for (unsigned i = 0; i < SPATIAL_PIXELS; i++) {
-        unsigned char rgb[3], color[3];
-        LedBlend b = blends[i];
-        blend_color(regions[b.a], regions[b.b], b.weight, rgb);
-        boost_color(rgb, color);
+        const unsigned char *color = plane + i * 3;
         line[used++] = alphabet[color[0] >> 2];
         line[used++] = alphabet[((color[0] & 3) << 4) | (color[1] >> 4)];
         line[used++] = alphabet[((color[1] & 15) << 2) | (color[2] >> 6)];

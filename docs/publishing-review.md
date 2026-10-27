@@ -190,3 +190,21 @@ never an automatic restart.
 All host checks and the ARM package verification pass. No TV connection, install,
 launch or service restart was performed. Real LG capture, flash-filesystem behavior,
 receiver interoperability and physical remote validation remain pending on the TV.
+
+## HyperHDR FlatBuffer output for every LED instance (unreleased)
+
+No new capture path is involved: the same sixteen synthetic histogram regions are
+encoded as a raw RGB plane instead of base64 JSON. The verification below was
+performed on the development host only.
+
+- `native/test_flatbuffer.c` and `native/test_flatbuffer_output.c` pass with
+  ASan/UBSan, together with the existing native, Python and UI suites.
+- The encoded requests were accepted by a live HyperHDR 22.0.0 FlatBuffer server
+  (TV at 192.168.2.14:19400) using priority 249, an invisible test priority below
+  the active PicCap input at 150. `serverinfo` reported `249 FLATBUFSERVER
+  HyperDRM@...` while a frame was registered and no entry afterwards, and every
+  Register, Image and Clear request returned an empty `Reply.error`. Nothing was
+  installed, reconfigured or restarted on the TV.
+- Not verified: end-to-end colors from the TV service over FlatBuffer, per-instance
+  LED output, and behavior with more than two instances. Building the ARM package,
+  installing it, elevation and a DRM playback check remain pending on the TV.

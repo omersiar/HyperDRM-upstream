@@ -162,8 +162,10 @@ static void set_error(const char *s) {
     snprintf(last_error, sizeof(last_error), "%s", s);
     fprintf(stderr, "%s\n", s);
 }
-static ReceiverRuntime receiver_runtime = {.output = {.fd = -1}};
+static ReceiverRuntime receiver_runtime = {.output = {.fd = -1}, .flatbuffer = {.fd = -1}};
 static void layout_refresh_reset(uint64_t due);
+static void receiver_stop(uint64_t now, bool clear);
+static void receiver_close(void);
 static void release_capture(bool clear_output) {
     layout_refresh_reset(milliseconds() + 5000);
     free(receiver_layout.blends);
@@ -175,7 +177,7 @@ static void release_capture(bool clear_output) {
     memset(capture_ctx.sent_rgb, 0, sizeof(capture_ctx.sent_rgb));
     receiver_runtime.starting = false;
     receiver_runtime.clear_pending = false;
-    output_stop(&receiver_runtime.output, milliseconds(), clear_output);
+    receiver_stop(milliseconds(), clear_output);
     if (capture_ctx.handle) {
         vt_finish(capture_ctx.handle);
         capture_ctx.handle = NULL;
@@ -198,6 +200,7 @@ static bool respond(void *h, void *m, const char *s) {
 #define RECEIVER_LAYOUT_REVISION layout_updates
 #include "receiver_stream.h"
 #include "source_bridge.h"
+#include "frame_output.h"
 #include "service_api.h"
 #include "dark_color.h"
 #include "capture_loop.h"
@@ -278,7 +281,8 @@ int main(void) {
     stream_close(milliseconds());
     test_close();
     stop_capture();
-    output_close(&receiver_runtime.output);
+    receiver_close();
+    fb_out_release(&receiver_runtime.flatbuffer);
     if (piccap_owned) {
         handover_enabled = false;
         retry_pause(&retries);

@@ -13,13 +13,20 @@
 #include "atomic_file.h"
 #define TARGET_PREF                                                                                \
     "/media/developer/apps/usr/palm/services/org.webosbrew.histogramhyperion.service/target.json"
+/* HyperHDR's JSON API binds one LED hardware instance to a connection, so extra
+ * instances never see those frames. Its FlatBuffer server decodes one frame and
+ * broadcasts it to every running instance, which is what "flatbuffer" selects.
+ * Hyperion keeps the JSON colour-array path. */
 typedef struct {
-    char host[46], receiver[16], token[257];
+    char host[46], receiver[16], token[257], output[16];
     unsigned port, piccap_port, capture_interval;
 } TargetConfig;
 static TargetConfig target = {
     .host = "127.0.0.1", .receiver = "Hyperion", .port = 19444, .piccap_port = 19400,
-    .capture_interval = 50};
+    .capture_interval = 50, .output = "json"};
+static inline bool target_flatbuffer(const TargetConfig *t) {
+    return !strcmp(t->receiver, "HyperHDR") && !strcmp(t->output, "flatbuffer");
+}
 static inline unsigned target_capture_interval(const TargetConfig *t) {
     return t->capture_interval ? t->capture_interval : 50;
 }
@@ -44,6 +51,8 @@ static bool target_valid(const TargetConfig *t) {
         return false;
     if (!t->port || t->port > 65535 ||
         (strcmp(t->receiver, "Hyperion") && strcmp(t->receiver, "HyperHDR")))
+        return false;
+    if (strcmp(t->output, "json") && strcmp(t->output, "flatbuffer"))
         return false;
     for (const unsigned char *p = (const unsigned char *)t->token; *p; p++)
         if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') ||
@@ -118,6 +127,18 @@ static bool target_parse(PlaybackJson *j, const char *text, TargetConfig *out) {
                 next.capture_interval = (unsigned)n;
         }
     }
+    void *output = NULL;
+    if (j->type(root) == 4 && j->get(root, "output", &output)) {
+        if (j->type(output) != 6)
+            valid = false;
+        else {
+            const char *s = j->string(output);
+            if (strcmp(s, "json") && strcmp(s, "flatbuffer"))
+                valid = false;
+            else
+                snprintf(next.output, sizeof(next.output), "%s", s);
+        }
+    }
     void *clear = playback_field(j, root, "clearToken");
     if (clear) {
         if (j->type(clear) != 1)
@@ -137,8 +158,10 @@ static bool target_save(const char *path, const TargetConfig *t) {
     char data[512];
     int n = snprintf(
         data, sizeof(data),
-        "{\"host\":\"%s\",\"port\":%u,\"piccapPort\":%u,\"receiver\":\"%s\",\"token\":\"%s\",\"captureIntervalMs\":%u}\n",
-        t->host, t->port, t->piccap_port, t->receiver, t->token, target_capture_interval(t));
+        "{\"host\":\"%s\",\"port\":%u,\"piccapPort\":%u,\"receiver\":\"%s\","
+        "\"output\":\"%s\",\"token\":\"%s\",\"captureIntervalMs\":%u}\n",
+        t->host, t->port, t->piccap_port, t->receiver, t->output, t->token,
+        target_capture_interval(t));
     return n > 0 && (size_t)n < sizeof(data) &&
            atomic_replace(path, data, (size_t)n) != SAVE_UNCHANGED;
 }
@@ -154,8 +177,8 @@ static bool target_load(PlaybackJson *j, const char *path, TargetConfig *t) {
     data[n] = 0;
     return target_parse(j, data, t);
 }
-static int target_open(const TargetConfig *t) {
-    if (!target_valid(t))
+static int target_open_port(const TargetConfig *t, unsigned port) {
+    if (!target_valid(t) || !port || port > 65535)
         return -1;
     struct sockaddr_storage storage = {0};
     socklen_t length;
@@ -165,12 +188,12 @@ static int target_open(const TargetConfig *t) {
     if (inet_pton(AF_INET, t->host, &v4->sin_addr) == 1) {
         family = AF_INET;
         v4->sin_family = family;
-        v4->sin_port = htons(t->port);
+        v4->sin_port = htons(port);
         length = sizeof(*v4);
     } else {
         family = AF_INET6;
         v6->sin6_family = family;
-        v6->sin6_port = htons(t->port);
+        v6->sin6_port = htons(port);
         length = sizeof(*v6);
     }
     int fd = socket(family, SOCK_STREAM, 0);
@@ -188,5 +211,8 @@ static int target_open(const TargetConfig *t) {
         }
     }
     return fd;
+}
+static int target_open(const TargetConfig *t) {
+    return target_open_port(t, t->port);
 }
 #endif
