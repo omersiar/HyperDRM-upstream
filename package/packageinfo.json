@@ -1,0 +1,10 @@
+{
+  "id": "org.webosbrew.histogramhyperion",
+  "version": "0.13.4",
+  "vendor": "Local development",
+  "app": "org.webosbrew.histogramhyperion",
+  "services": [
+    "org.webosbrew.histogramhyperion.service"
+  ],
+  "sourceUrl": "https://gitea.adnau.de/matze19999/HyperDRM"
+}

@@ -1,0 +1,19 @@
+title: HyperDRM
+iconUri: https://gitea.adnau.de/matze19999/HyperDRM/raw/branch/main/app/icon.png
+manifestUrl: https://gitea.adnau.de/matze19999/HyperDRM/raw/branch/main/HyperDRM.manifest.json
+category: amblight
+pool: main
+shortDescription: TV color histograms for local Hyperion ambient lighting
+requirements:
+  webosRelease: "10.2.2"
+  deviceSoC:
+    - o24
+description: |
+  HyperDRM sends spatial LED colors from LG color histograms to Hyperion
+  running on the TV. It supports dynamic LED layouts, interpolated colors,
+  top/bottom black-bar detection and optional boot autostart.
+
+  Tested on a rooted LG G4, Rockhopper release 10.2.2-57, device SoC o24.
+  Homebrew Channel service elevation and local Hyperion are required.
+  Other models and releases are not validated. This is color output;
+  no video preview stream is provided.

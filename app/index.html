@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>HyperDRM</title>
+<style>
+body{background:#101827;color:#f1f5ff;font:24px sans-serif;margin:36px 54px;max-width:1800px}
+h1{font-size:40px;display:flex;align-items:center;gap:18px;margin:0 0 16px}h1 img{border-radius:16px}
+button{font:inherit;padding:14px 24px;margin:8px 12px 8px 0;background:#223654;color:white;border:2px solid #739be0;border-radius:10px}
+button:disabled{opacity:.45}button:focus,.field:focus{outline:4px solid #66ddff;outline-offset:3px}
+nav{border-bottom:1px solid #456185;padding-bottom:10px;margin-bottom:18px}nav button[aria-pressed="true"]{background:#126b85;border-color:#66ddff}
+.primary{background:#126b85;border-color:#66ddff}p{line-height:1.4;margin:12px 0}small{color:#c0cbe0;font-size:21px}
+#error{color:#ffbc99}fieldset{border:1px solid #456185;border-radius:12px;padding:18px 24px;margin:16px 0}
+.fields{display:flex;flex-wrap:wrap;gap:18px;margin:18px 0}.field{border:2px solid #739be0;border-radius:10px;padding:12px;background:#1b2b43;width:360px;cursor:pointer}
+.field label{display:flex;flex-direction:column;gap:10px;font-size:22px}.field input,.field textarea{font:inherit;color:white;background:transparent;border:0;outline:0;width:100%;padding:0;box-sizing:border-box}
+.field:focus-within{border-color:#66ddff}.field input:read-write,.field textarea:read-write{background:#223654;outline:2px solid #66ddff}
+.narrow{width:225px}.wide{width:95%;max-width:1200px}#clearToken{width:24px;height:24px}
+#regions{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0}.swatch{width:50px;height:50px;border:1px solid #abc;border-radius:6px}
+#diagnostics{display:block;margin-top:14px;max-width:1500px}#cancelCalibration{display:none}
+#cancelCalibration:not(:disabled){display:block;position:fixed;right:24px;top:24px;z-index:101;font-size:20px;opacity:.65}
+#calibrationVideo{display:none;position:fixed;inset:0;width:100vw;height:100vh;object-fit:fill;background:black;z-index:100}
+.steps{display:flex;gap:24px;flex-wrap:wrap}.steps p{flex:1;min-width:260px;color:#c0cbe0}.steps strong{display:block;color:#fff;margin-bottom:6px}
+</style>
+<h1><img src="logo.png" alt="" width="76" height="76">HyperDRM</h1>
+<nav aria-label="App sections"><button id="overviewTab" aria-pressed="true">Overview</button><button id="receiverTab" aria-pressed="false">Receiver</button><button id="calibrationTab" aria-pressed="false">Calibration</button></nav>
+<p id="status" role="status">Checking service &hellip;</p><p id="error" role="alert"></p>
+<p id="versionWarning" role="alert" style="display:none"></p><button id="reloadService" style="display:none">Reload service</button>
+<section id="overviewPanel" aria-label="Overview">
+<button id="grantRoot" class="primary" style="display:none">Enable Root Access</button><p id="rootHint" style="display:none"><small>Homebrew Channel grants root to the HyperDRM service. The service then restarts with its updated permissions.</small></p>
+<div role="group" aria-label="Service controls"><button id="start" class="primary">Start</button><button id="stop">Stop</button><button id="refresh">Refresh status</button></div>
+<fieldset><legend>Automatic operation</legend><button id="autostart" role="switch" aria-checked="false">Autostart: Off</button><button id="handover" role="switch" aria-checked="false" disabled>Auto PicCap: Off</button>
+<p><small>Autostart retries until the receiver is available. Auto PicCap uses PicCap for unprotected playback and HyperDRM for protected playback. Keep PicCap's own autostart off.</small></p></fieldset>
+<button id="calibrationShortcut">Auto Calibration</button><small>Measure a spatial profile for your TV.</small>
+<p><small id="endpoint">Priority 149 &middot; 10 updates per second</small></p><div id="regions" aria-label="Histogram colors"></div>
+<p><small>Adjust brightness, saturation and normal smoothing in Hyperion or HyperHDR.</small></p><small id="diagnostics"></small>
+</section>
+<section id="receiverPanel" aria-label="Receiver settings" style="display:none">
+<fieldset><legend>Receiver connection</legend><button id="receiver">Receiver: Hyperion</button>
+<p><small>Select a field with the arrow buttons. Press OK or click to open the TV keyboard.</small></p>
+<div class="fields">
+<div id="hostField" class="field" tabindex="0" role="button" aria-label="IP address, press OK to edit"><label>IP address<input id="host" tabindex="-1" readonly type="text" maxlength="45" value="127.0.0.1" spellcheck="false"></label></div>
+<div id="portField" class="field narrow" tabindex="0" role="button" aria-label="JSON port, press OK to edit"><label>JSON port<input id="port" tabindex="-1" readonly type="number" min="1" max="65535" value="19444"></label></div>
+<div id="piccapPortField" class="field narrow" tabindex="0" role="button" aria-label="FlatBuffer port, press OK to edit"><label>PicCap FlatBuffer port<input id="piccapPort" tabindex="-1" readonly type="number" min="1" max="65535" value="19400"></label></div>
+<div id="captureIntervalField" class="field narrow" tabindex="0" role="button" aria-label="Capture interval in milliseconds, press OK to edit"><label>Capture interval (ms)<input id="captureInterval" tabindex="-1" readonly type="number" min="25" max="1000" step="25" value="50"></label></div>
+<div id="tokenField" class="field" tabindex="0" role="button" aria-label="API token, press OK to edit"><label>API token (optional)<input id="token" tabindex="-1" readonly type="password" maxlength="256" autocomplete="off"></label></div>
+</div>
+<label><input id="clearToken" type="checkbox"> Remove saved token</label>
+<div><button id="saveTarget" class="primary">Save receiver</button><button id="testConnection">Test connection</button></div><p id="testResult" role="status">Connection test: Not tested</p>
+<p><small>The JSON TCP port is usually 19444. Leave the token blank to keep the saved token. Saving updates the current session. Histogram capture defaults to 50 ms; choose 25–1000 ms in steps of 25. Lower values reduce latency and increase TV load. PicCap uses its own capture rate.</small></p>
+<p id="piccapTargetHint"><small>Auto PicCap uses the same IP and its FlatBuffer port, usually 19400. Enable the receiver's FlatBuffer server. Remote IPv6 uses HyperDRM.</small></p></fieldset>
+</section>
+<section id="calibrationPanel" aria-label="TV calibration" style="display:none">
+<p id="profileStatus">Detecting TV model...</p>
+<fieldset><legend>Auto Calibration</legend>
+<div class="steps"><p><strong>1. Measure</strong>Play the built-in edge test. Keep the picture full-screen without bars.</p><p><strong>2. Save</strong>Review the result and save the measured profile.</p><p><strong>3. Check</strong>Validate all four colored screen corners against the LEDs.</p></div>
+<button id="calibrate" class="primary">Start Auto Calibration</button><button id="validateCalibration">Validate profile</button><p id="wizardStatus" role="status">Measurement takes about 70 seconds. Your saved profile is preserved until you select Save profile.</p>
+</fieldset>
+<fieldset><legend>Spatial profile</legend><button id="profile">Profile: Auto</button><button id="saveProfile" class="primary">Save profile</button><button id="editProfile" disabled>Edit profile JSON</button>
+<p><small>Auto uses your measured model profile or the built-in LG G4 profile. Other uncalibrated TVs use average colors.</small></p>
+<div id="customEditor" style="display:none"><div id="customProfileField" class="field wide" tabindex="0" role="button" aria-label="Custom profile JSON, press OK to edit"><label>Custom model profile JSON<textarea id="customProfile" tabindex="-1" readonly rows="4" maxlength="2048" disabled spellcheck="false"></textarea></label></div></div>
+</fieldset></section>
+<button id="cancelCalibration" disabled>Cancel calibration</button><video id="calibrationVideo" src="calibration.mp4" muted preload="auto" playsinline></video>
+<script src="version.js"></script><script src="remote.js"></script><script src="calibration.js"></script><script src="navigation.js"></script><script src="app.js"></script><script src="wizard.js"></script></html>

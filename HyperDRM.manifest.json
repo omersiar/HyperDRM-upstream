@@ -1,0 +1,15 @@
+{
+  "id": "org.webosbrew.histogramhyperion",
+  "version": "0.13.4",
+  "type": "web",
+  "title": "HyperDRM",
+  "appDescription": "Ambient lighting for webOS, Hyperion and HyperHDR",
+  "iconUri": "https://gitea.adnau.de/matze19999/HyperDRM/raw/branch/main/app/icon.png",
+  "sourceUrl": "https://gitea.adnau.de/matze19999/HyperDRM",
+  "rootRequired": true,
+  "ipkUrl": "https://gitea.adnau.de/matze19999/HyperDRM/raw/branch/main/HyperDRM_0.13.4_arm.ipk",
+  "ipkHash": {
+    "sha256": "3028ea164e05ff6b9c601aa7f3ff0f05b17781ba603eaebe3395abae503f7bb7"
+  },
+  "ipkSize": 1208554
+}

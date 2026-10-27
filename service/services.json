@@ -1,0 +1,1 @@
+{"id": "org.webosbrew.histogramhyperion.service", "description": "HyperDRM ambient light bridge to Hyperion or HyperHDR", "engine": "native", "executable": "histogram-service", "services": [{"name": "org.webosbrew.histogramhyperion.service", "description": "HyperDRM"}]}
