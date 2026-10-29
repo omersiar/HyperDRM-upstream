@@ -15,5 +15,8 @@ typedef struct {
     ReceiverOutput output;
     FlatbufferOutput flatbuffer;
     bool starting, clear_pending;
+    /* Age of the latch that is currently holding capture back. A latch with a
+     * deadline cannot strand the service the way an unbounded one did. */
+    uint64_t starting_since, closing_since;
 } ReceiverRuntime;
 #endif

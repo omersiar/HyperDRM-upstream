@@ -12,10 +12,10 @@ calibration-samples.jsonl
 ledstream-boost.jsonl
 # Generated intermediate files and old packages
 calibration-gradient.ppm
+HyperDRM_*_arm.ipk
 org.webosbrew.histogramhyperion_*.ipk
 histogram-probe
 test-blackbars
-test-color-boost
 test-histogram
 test-interpolation
 test-layout

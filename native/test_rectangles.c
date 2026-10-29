@@ -25,10 +25,9 @@ int main(void) {
     calibration_generation++;
     assert(calibration_rectangles());
 
-    /* 1/area: where both rectangles cover, the small local one carries more. */
-    double wide = 1.0 / (0.1 * 1.0), narrow = 1.0 / (0.15 * 0.2);
-    unsigned expected = (unsigned)(wide / (wide + narrow) * 65535 + 0.5);
-    same_blend(layout_point_blend(0.92, 0.5), 2, 10, expected);
+    /* Smallest containing rectangle: the local r2 measurement wins where both
+     * rectangles overlap, with no invented blend colour. */
+    same_blend(layout_point_blend(0.92, 0.5), 2, 2, 0);
     /* Only the wide rectangle covers here. */
     same_blend(layout_point_blend(0.95, 0.1), 10, 10, 0);
     /* Outside every rectangle: nearest measured centre. */
@@ -41,15 +40,15 @@ int main(void) {
     same_blend(rim, 2, 10, 49151);
     calibration.rect_geometry = true;
 
-    /* The plane itself must follow the rectangle model. */
-    unsigned char regions[16][3], plane[SPATIAL_PIXELS * 3], expected_rgb[3], rim_rgb[3];
+    /* The plane itself must follow the rectangle model: one measured region
+     * colour per pixel, no blend. */
+    unsigned char regions[16][3], plane[SPATIAL_PIXELS * 3], rim_rgb[3];
     memset(regions, 0, sizeof(regions));
     memset(regions[2], 40, 3);
     memset(regions[10], 200, 3);
     spatial_plane(regions, plane);
-    blend_color(regions[2], regions[10], expected, expected_rgb);
     const unsigned char *pixel = plane + (45 * SPATIAL_WIDTH + 147) * 3;
-    assert(!memcmp(pixel, expected_rgb, 3));
+    assert(pixel[0] == 40 && pixel[1] == 40 && pixel[2] == 40);
     blend_color(regions[2], regions[10], rim.weight, rim_rgb);
     assert(memcmp(pixel, rim_rgb, 3));
 
@@ -65,8 +64,9 @@ int main(void) {
     assert(calibration_parse(&json, "{\"profile\":\"auto\"}", &kept));
     assert(kept.rect_count == 2 && kept.rect_geometry);
 
-    /* Geometry without imported rectangles derives one edge block per anchor,
-     * so a plain calibrated profile can be compared against the rim model. */
+    /* Geometry without imported rectangles must fall back to the rim model.
+     * Inventing blocks from rim anchors made a Voronoi mosaic that did not
+     * describe the TV picture. */
     const char *blocks =
         "{\"profile\":\"custom\",\"model\":\"TV-ONE\",\"geometry\":\"rectangles\","
         "\"points\":[{\"position\":0.5,\"region\":3},{\"position\":1.5,\"region\":10},"
@@ -76,25 +76,15 @@ int main(void) {
     assert(derived.rect_count == 0 && derived.rect_geometry);
     calibration = derived;
     calibration_generation++;
-    assert(calibration_rectangles());
-    unsigned blocks_count = 0;
+    assert(calibration_rectangles() == false);
+    unsigned blocks_count = 99;
     calibration_blocks(&blocks_count);
-    assert(blocks_count == 4);
-    same_blend(layout_point_blend(0.05, 0.5), 15, 15, 0);
-    same_blend(layout_point_blend(0.95, 0.5), 10, 10, 0);
-    same_blend(layout_point_blend(0.5, 0.05), 3, 3, 0);
-    same_blend(layout_point_blend(0.5, 0.95), 1, 1, 0);
-    /* Uncovered centre: nearest block centre, not a cone. */
-    same_blend(layout_point_blend(0.5, 0.4), 3, 3, 0);
-    /* Overlapping corner blocks blend by 1/area (equal areas -> half). */
-    LedBlend corner = layout_point_blend(0.1, 0.1);
-    assert(corner.a == 3 && corner.b == 15 && corner.weight >= 32767 && corner.weight <= 32768);
-    memset(regions[15], 90, 3);
-    spatial_plane(regions, plane);
-    pixel = plane + (45 * SPATIAL_WIDTH + 3) * 3;
-    assert(pixel[0] == 90);
+    assert(blocks_count == 0);
+    LedBlend fallback = layout_point_blend(0.05, 0.5), rim_fallback = layout_blend(0.05, 0.5);
+    assert(fallback.a == rim_fallback.a && fallback.b == rim_fallback.b &&
+           fallback.weight == rim_fallback.weight);
 
-    /* An emptied list keeps the mode (derived blocks); geometry rim disables it. */
+    /* An emptied list keeps the mode but cannot paint rectangles. */
     Calibration emptied = calibration;
     assert(calibration_parse(&json,
                              "{\"profile\":\"custom\",\"model\":\"TV-ONE\",\"points\":[{\"position\":0.5,"
@@ -102,6 +92,9 @@ int main(void) {
                              "\"region\":1},{\"position\":3.5,\"region\":15}],\"rectangles\":[]}",
                              &emptied));
     assert(!emptied.rect_count && emptied.rect_geometry);
+    calibration = emptied;
+    calibration_generation++;
+    assert(calibration_rectangles() == false);
     Calibration rim_mode = calibration;
     assert(calibration_parse(&json,
                              "{\"profile\":\"custom\",\"model\":\"TV-ONE\",\"geometry\":\"rim\","
@@ -138,7 +131,7 @@ int main(void) {
         assert(!memcmp(&before, &next, sizeof(next)));
     }
 
-    /* Persistence keeps rectangles, the geometry selection and derived mode. */
+    /* Persistence keeps rectangles and the geometry selection. */
     const char *path = "/tmp/hyperdrm-rectangles-test.json";
     calibration = next;
     assert(access(path, F_OK) != 0);
@@ -153,10 +146,11 @@ int main(void) {
     calibration = (Calibration){0};
     calibration_load(&json, path);
     assert(calibration.rect_count == 0 && calibration.rect_geometry && calibration.count == 4);
-    assert(calibration_rectangles());
+    assert(!calibration_rectangles());
     unlink(path);
 
-    puts("PASS: rectangle geometry, 1/area weights, derived blocks, nearest-centre fallback, "
-         "geometry kept across recalibration, plane output, validation and save/load");
+    puts("PASS: rectangle geometry, smallest containing rectangle, measured-only rectangles "
+         "with rim fallback, nearest-centre fallback, geometry kept across recalibration, plane "
+         "output, validation and save/load");
     return 0;
 }

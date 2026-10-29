@@ -7,24 +7,33 @@
 #define CALIBRATION_PREF                                                                           \
     "/media/developer/apps/usr/palm/services/org.webosbrew.histogramhyperion.service/"             \
     "calibration.json"
-#define CALIBRATION_JSON_MAX 4096
+#define CALIBRATION_JSON_MAX 8192
 typedef struct {
     double position;
     unsigned char region;
 } RimPoint;
 typedef enum { CAL_AUTO, CAL_G4, CAL_AVERAGE, CAL_CUSTOM } CalibrationKind;
 /* Optional measured sampling rectangle of one histogram region. LG reports the
- * mean of the pixels inside its own rectangle, so painting measured rectangles
- * back with 1/area weights is the inverse of that measurement. Rectangles may
- * overlap; the geometry selector chooses between this and perimeter rim
- * interpolation without discarding the other representation. */
+ * mean of the pixels inside its own rectangle; the renderer inverts those
+ * overlapping box averages on a small grid instead of treating them as tiles.
+ * Rectangles may overlap. */
 typedef struct {
     double x0, y0, x1, y1;
     unsigned char region;
 } RegionRect;
-/* Depth of a derived edge block: how far inwards from the rim an anchor paints
- * when the rectangle geometry is selected without imported rectangles. */
-#define REGION_BLOCK_DEPTH 0.19
+/* How the 256 bins of a region/channel become one value. The mean is the
+ * default and the only lossless-to-8-bit choice when the picture is uniform;
+ * a percentile keeps the bright end of a region that mixes light and dark. */
+#define CAL_STAT_MEAN 0
+#define CAL_STAT_P50 1
+#define CAL_STAT_P90 2
+#define CAL_STAT_PEAK 3
+static inline const char *calibration_stat_key(unsigned stat) {
+    return stat == CAL_STAT_P50    ? "p50"
+           : stat == CAL_STAT_P90  ? "p90"
+           : stat == CAL_STAT_PEAK ? "peak"
+                                   : "mean";
+}
 typedef struct {
     CalibrationKind kind;
     char model[64];
@@ -33,6 +42,16 @@ typedef struct {
     unsigned rect_count;
     RegionRect rects[16];
     bool rect_geometry;
+    /* Full-black and full-white reference means, measured per region/channel.
+     * Optional: only used when the user enables colour-cast compensation. */
+    bool has_reference;
+    bool compensate;
+    bool active_mean;
+    /* Colour statistic for the rendered feed. active_mean keeps its own meaning
+     * and takes precedence when it is set. */
+    unsigned color_stat;
+    unsigned char black[16][3];
+    unsigned char white[16][3];
 } Calibration;
 static Calibration calibration;
 static char tv_model[64];
@@ -70,89 +89,40 @@ static inline CalibrationKind calibration_effective(void) {
     return calibration_is_g4(tv_model) ? CAL_G4 : CAL_AVERAGE;
 }
 /* Rectangle geometry is an opt-in alternative to perimeter rim interpolation
- * and only ever applies to a measured custom profile. Imported rectangles win;
- * without them the rim anchors are rendered as derived edge blocks. */
+ * and only ever applies to a measured custom profile with real rectangles.
+ * Without measured rectangles the rim model is used: inventing blocks from the
+ * rim anchors made a Voronoi mosaic that did not describe the TV picture. */
 static inline bool calibration_rectangles(void) {
-    return calibration.rect_geometry && calibration_effective() == CAL_CUSTOM;
+    return calibration.rect_geometry && calibration_effective() == CAL_CUSTOM &&
+           calibration.rect_count > 0;
 }
-static double wrap_perimeter(double value) {
-    /* Bounded loop instead of fmod(): the service links without libm. */
-    while (value >= 4)
-        value -= 4;
-    while (value < 0)
-        value += 4;
-    return value;
-}
-static void perimeter_point(double t, double *x, double *y) {
-    t = wrap_perimeter(t);
-    if (t < 1) {
-        *x = t;
-        *y = 0;
-    } else if (t < 2) {
-        *x = 1;
-        *y = t - 1;
-    } else if (t < 3) {
-        *x = 3 - t;
-        *y = 1;
-    } else {
-        *x = 0;
-        *y = 4 - t;
-    }
-}
-static RegionRect region_blocks[16];
-static unsigned region_block_count, region_block_generation;
-/* One block per rim anchor: the arc up to the neighbouring anchors becomes a
- * rectangle along that edge, deepened towards the picture. This is a starting
- * geometry that lets a rim profile be compared against rectangle rendering
- * without hand-entered data; imported rectangles always take precedence. */
+/* Only measured rectangles are painted. The rectangle geometry has no derived
+ * fallback: a rim anchor does not describe how far a region reaches inwards. */
 static const RegionRect *calibration_blocks(unsigned *count) {
-    if (calibration.rect_count) {
-        *count = calibration.rect_count;
-        return calibration.rects;
-    }
-    if (region_block_generation != calibration_generation) {
-        region_block_count = 0;
-        unsigned n = calibration.count;
-        for (unsigned i = 0; i < n; i++) {
-            double p = calibration.points[i].position;
-            double previous = calibration.points[(i + n - 1) % n].position;
-            double following = calibration.points[(i + 1) % n].position;
-            double start = wrap_perimeter(p - wrap_perimeter(p - previous) / 2);
-            double end = wrap_perimeter(p + wrap_perimeter(following - p) / 2);
-            double ax, ay, bx, by;
-            perimeter_point(start, &ax, &ay);
-            perimeter_point(end, &bx, &by);
-            double x0 = ax < bx ? ax : bx, x1 = ax < bx ? bx : ax;
-            double y0 = ay < by ? ay : by, y1 = ay < by ? by : ay;
-            if (x1 - x0 < 1e-9) {
-                if (x0 > 0.5) {
-                    x0 = 1 - REGION_BLOCK_DEPTH;
-                    x1 = 1;
-                } else {
-                    x0 = 0;
-                    x1 = REGION_BLOCK_DEPTH;
-                }
-            }
-            if (y1 - y0 < 1e-9) {
-                if (y0 > 0.5) {
-                    y0 = 1 - REGION_BLOCK_DEPTH;
-                    y1 = 1;
-                } else {
-                    y0 = 0;
-                    y1 = REGION_BLOCK_DEPTH;
-                }
-            }
-            unsigned char region = calibration.points[i].region;
-            bool duplicate = false;
-            for (unsigned k = 0; k < region_block_count; k++)
-                duplicate = duplicate || region_blocks[k].region == region;
-            if (!duplicate && x0 < x1 && y0 < y1)
-                region_blocks[region_block_count++] = (RegionRect){x0, y0, x1, y1, region};
+    *count = calibration.rect_count;
+    return calibration.rects;
+}
+static inline bool calibration_reference_parse(PlaybackJson *j, void *root, const char *key,
+                                               unsigned char out[16][3]) {
+    void *array = NULL;
+    if (!j->get(root, key, &array) || j->type(array) != 5 || j->length(array) != 16)
+        return false;
+    for (size_t i = 0; i < 16; i++) {
+        void *row = j->at(array, i);
+        if (!row || j->type(row) != 5 || j->length(row) != 3)
+            return false;
+        for (size_t c = 0; c < 3; c++) {
+            void *value = j->at(row, c);
+            if (!value || (j->type(value) != 2 && j->type(value) != 3))
+                return false;
+            char *end;
+            double number = strtod(j->string(value), &end);
+            if (!end || *end || !isfinite(number) || number < 0 || number > 255)
+                return false;
+            out[i][c] = (unsigned char)(number + 0.5);
         }
-        region_block_generation = calibration_generation;
     }
-    *count = region_block_count;
-    return region_blocks;
+    return true;
 }
 static inline bool calibration_parse(PlaybackJson *j, const char *text, Calibration *result) {
     void *root = playback_parse_exact(j, text);
@@ -167,7 +137,9 @@ static inline bool calibration_parse(PlaybackJson *j, const char *text, Calibrat
             break;
         }
     void *points = NULL;
+    bool has_points = false;
     if (j->type(root) == 4 && j->get(root, "points", &points)) {
+        has_points = true;
         void *model = playback_field(j, root, "model");
         valid = valid && points && j->type(points) == 5 && model && j->type(model) == 6 &&
                 calibration_model_valid(j->string(model));
@@ -248,6 +220,48 @@ static inline bool calibration_parse(PlaybackJson *j, const char *text, Calibrat
         else
             valid = false;
     }
+    void *black = NULL, *white = NULL, *compensate = NULL;
+    bool black_present = j->type(root) == 4 && j->get(root, "black", &black);
+    bool white_present = j->type(root) == 4 && j->get(root, "white", &white);
+    unsigned char black_ref[16][3], white_ref[16][3];
+    bool black_valid = !black_present || calibration_reference_parse(j, root, "black", black_ref);
+    bool white_valid = !white_present || calibration_reference_parse(j, root, "white", white_ref);
+    valid = valid && black_valid && white_valid;
+    if (has_points) {
+        /* A new point list belongs to a new measurement. Keep references only
+         * when the same JSON carries both arrays. */
+        next.has_reference = black_present && white_present && black_valid && white_valid;
+        if (next.has_reference) {
+            memcpy(next.black, black_ref, sizeof(next.black));
+            memcpy(next.white, white_ref, sizeof(next.white));
+        } else {
+            memset(next.black, 0, sizeof(next.black));
+            memset(next.white, 0, sizeof(next.white));
+        }
+    } else if (black_present && white_present && black_valid && white_valid) {
+        next.has_reference = true;
+        memcpy(next.black, black_ref, sizeof(next.black));
+        memcpy(next.white, white_ref, sizeof(next.white));
+    }
+    if (j->type(root) == 4 && j->get(root, "compensate", &compensate)) {
+        valid = valid && j->type(compensate) == 1;
+        if (valid)
+            next.compensate = playback_true(j, root, "compensate");
+    }
+    void *active_mean = NULL;
+    if (j->type(root) == 4 && j->get(root, "activeMean", &active_mean)) {
+        valid = valid && j->type(active_mean) == 1;
+        if (valid)
+            next.active_mean = playback_true(j, root, "activeMean");
+    }
+    if (playback_is(j, root, "colorStat", "p50"))
+        next.color_stat = CAL_STAT_P50;
+    else if (playback_is(j, root, "colorStat", "p90"))
+        next.color_stat = CAL_STAT_P90;
+    else if (playback_is(j, root, "colorStat", "peak"))
+        next.color_stat = CAL_STAT_PEAK;
+    else if (playback_is(j, root, "colorStat", "mean"))
+        next.color_stat = CAL_STAT_MEAN;
     if (next.kind == CAL_CUSTOM && next.count < 2)
         valid = false;
     j->put(root);
@@ -302,6 +316,26 @@ static inline bool calibration_save(const char *path, const Calibration *value) 
                              value->rects[i].y0, value->rects[i].x1, value->rects[i].y1);
         used += snprintf(data + used, sizeof(data) - used, "]");
     }
+    if (value->has_reference || value->compensate) {
+        used += snprintf(data + used, sizeof(data) - used, ",\"compensate\":%s",
+                         value->compensate ? "true" : "false");
+        if (value->has_reference) {
+            used += snprintf(data + used, sizeof(data) - used, ",\"black\":[");
+            for (unsigned i = 0; i < 16; i++)
+                used += snprintf(data + used, sizeof(data) - used, "%s[%u,%u,%u]", i ? "," : "",
+                                 value->black[i][0], value->black[i][1], value->black[i][2]);
+            used += snprintf(data + used, sizeof(data) - used, "],\"white\":[");
+            for (unsigned i = 0; i < 16; i++)
+                used += snprintf(data + used, sizeof(data) - used, "%s[%u,%u,%u]", i ? "," : "",
+                                 value->white[i][0], value->white[i][1], value->white[i][2]);
+            used += snprintf(data + used, sizeof(data) - used, "]");
+        }
+    }
+    if (value->active_mean)
+        used += snprintf(data + used, sizeof(data) - used, ",\"activeMean\":true");
+    if (value->color_stat)
+        used += snprintf(data + used, sizeof(data) - used, ",\"colorStat\":\"%s\"",
+                         calibration_stat_key(value->color_stat));
     used += snprintf(data + used, sizeof(data) - used, "}\n");
     return used > 0 && (size_t)used < sizeof(data) &&
            atomic_replace(path, data, (size_t)used) != SAVE_UNCHANGED;

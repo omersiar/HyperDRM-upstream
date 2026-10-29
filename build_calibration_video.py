@@ -19,11 +19,23 @@ for step in range(32):
     w,h=min(width,x+w)-left,min(height,y+h)-top
     start=4+step*2
     filters.append(f"drawbox=x={left}:y={top}:w={w}:h={h}:color=white:t=fill:enable='gte(t,{start})*lt(t,{start+2})'")
+# A black gap, a full white reference, then white/black split sweeps. A region's
+# white fraction at split s is the fraction of its sampling rectangle left of s,
+# so the nine splits recover x0/x1 and y0/y1 of every LG histogram region.
+filters.append("drawbox=x=0:y=0:w=1920:h=1080:color=white:t=fill:enable='gte(t,70)*lt(t,72)'")
+for step in range(9):
+    w=round((step+1)/10*width)
+    start=72+step*2
+    filters.append(f"drawbox=x=0:y=0:w={w}:h={height}:color=white:t=fill:enable='gte(t,{start})*lt(t,{start+2})'")
+for step in range(9):
+    h=round((step+1)/10*height)
+    start=90+step*2
+    filters.append(f"drawbox=x=0:y=0:w={width}:h={h}:color=white:t=fill:enable='gte(t,{start})*lt(t,{start+2})'")
 # Four color quadrants for visual validation after measurement.
 for x,y,color in [(0,0,'red'),(960,0,'lime'),(960,540,'blue'),(0,540,'yellow')]:
-    filters.append(f"drawbox=x={x}:y={y}:w=960:h=540:color={color}:t=fill:enable='gte(t,68)'")
+    filters.append(f"drawbox=x={x}:y={y}:w=960:h=540:color={color}:t=fill:enable='gte(t,108)'")
 subprocess.run([args.ffmpeg,'-hide_banner','-loglevel','error','-y','-f','lavfi','-i',
-               'color=black:s=1920x1080:r=30:d=78','-vf',','.join(filters),
+               'color=black:s=1920x1080:r=30:d=116','-vf',','.join(filters),
                '-c:v','libx264','-preset','fast','-crf','16','-pix_fmt','yuv420p',
                '-profile:v','main','-level','4.0','-g','30','-an','-movflags','+faststart',
                str(root/'app/calibration.mp4')],check=True)

@@ -3,7 +3,8 @@ static bool calibration_session(void *h, void *m, void *ctx) {
     (void)ctx;
     const char *p = payload(m);
     if (!strcmp(p, "{\"enabled\":true}")) {
-        calibration_ctx.until = milliseconds() + 110000;
+        /* The guided measurement now also runs the white/split extent sweeps. */
+        calibration_ctx.until = milliseconds() + 180000;
         if (capture_ctx.handle && vt_preset(capture_ctx.handle, 0) != 0) {
             calibration_ctx.until = 0;
             return respond(h, m,

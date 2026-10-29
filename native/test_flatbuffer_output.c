@@ -203,6 +203,11 @@ int main(void) {
     (void)target_parse;
     (void)target_load;
     (void)target_save;
+    /* A failed close-transaction used to leave `closing` set, which gated the
+     * capture tick's recovery branch for good. Closing must clear it. */
+    FlatbufferOutput latch = {.fd = -1, .stage = FB_FAILED, .closing = true};
+    fb_out_close(&latch);
+    assert(!latch.closing);
     PlaybackJson json = {0};
     assert(playback_json_init(&json));
     run_fixture(&json, 0);

@@ -11,10 +11,13 @@ Ambient Light for webOS, Hyperion and HyperHDR. An own webOS app and native ARM 
 - LED count, ordering and screen rectangles read from the receiver at startup and refreshed every five seconds without capture restart. No fixed 200-LED layout; layouts with 50 and 500 LEDs were tested.
 - Automatic detection of top/bottom black bars on the calibrated LG G4.
 - Bounded last-color hold on empty/failed histogram reads, real black detection and 500 ms source transitions using a raw receiver LED subscription.
-- Guided full-screen video calibration for additional TV models, with review before saving and a four-color validation video.
-- Original saturation and brightness (both gains 1.0).
+- Guided full-screen video calibration for additional TV models: 32 perimeter patches measure the rim anchors, nine vertical and nine horizontal white/black splits measure the 16 region rectangles, black/white phases record per-region colour references, and a four-color video validates the saved profile before it is used.
+- Optional per-region colour-cast compensation from the measured full-black and full-white references, off by default. It neutralises a Warm picture mode or Eye Comfort/Blue Light Reduction on the LEDs without changing the TV picture.
+- Optional active-area mean, off by default. It averages only the pixels above the measured black level, so a bright object in a mostly black LG region is not diluted by the background.
+- Optional colour statistic per saved profile: `mean` (default), `p50`, `p90` or `peak`, set as `"colorStat"` in the profile. The mean maps a half-black, half-white region onto the same colour as flat grey; a percentile keeps the bright end. Letterbox and bar decisions always use the mean, so changing the statistic never changes what the service decides.
+- Original saturation and brightness: colours are passed through, never re-gained.
 - Start, stop, status and persistent boot autostart switch in the TV app.
-- Configurable IPv4/IPv6 receiver and JSON TCP port, optional token authentication, priority 149, up to 10 updates per second.
+- Configurable IPv4/IPv6 receiver and JSON TCP port, optional token authentication, priority 149, 25 to 1000 ms capture interval.
 
 ## Requirements and limits
 
@@ -22,13 +25,13 @@ Tested on a rooted LG G4 with webOS 24, Homebrew Channel and Hyperion 2.0.16 and
 
 DRM playback color output was confirmed on the test TV. Support depends on LG's capture implementation; this does not guarantee support on other devices or apps. HyperDRM transmits colors, not captured video frames. The video preview does not show the TV picture. HyperHDR may show a generated histogram color plane instead.
 
-The 16 histogram samples are independent measurements; interpolation produces smoother transitions without adding independently captured detail. Sample positions come from the selected model profile; the built-in profile contains approximate G4 calibration values. Auto uses uniform average colors on uncalibrated models. Top/bottom bar detection is supported; side bars, arbitrary bar thickness and HDR color calibration remain limited.
+The 16 histogram samples are independent measurements; interpolation produces smoother transitions without adding independently captured detail. The built-in profile contains approximate G4 calibration values. Auto Calibration measures both the perimeter anchors and the actual sampling rectangle of each region; a profile without measured rectangles falls back to the perimeter model instead of inventing extents. The same run records full-black and full-white references per region; **Colour cast compensation** can apply them, but is off by default. Auto uses uniform average colors on uncalibrated models. Top/bottom bar detection is supported; side bars, arbitrary bar thickness and HDR color calibration remain limited.
 
 Only the own service is modified. Optional Auto PicCap can configure its receiver endpoint and start and stop the installed PicCap service through its existing API. No Hue, LG library, driver or firmware binaries are included. For histogram initialization, the service temporarily creates LG's developer marker and uses a guardian process to remove its own marker afterward; an existing marker is preserved.
 
 ## Installation
 
-The current package is [HyperDRM_0.13.4_arm.ipk](HyperDRM_0.13.4_arm.ipk). Install it using the TV's webOS/Homebrew package installation workflow.
+The current package is [HyperDRM_0.15.4_arm.ipk](HyperDRM_0.15.4_arm.ipk). Install it using the TV's webOS/Homebrew package installation workflow.
 
 Elevate the installed own service through Homebrew Channel:
 
@@ -64,7 +67,7 @@ The package builder bundles only the own app, native executable, metadata and lo
 
 ## Tests and calibration
 
-The native tests cover histogram decoding, black bar classification, color boost, interpolation and dynamic layout validation. Build each `native/test_*.c` for ARM and run on the TV. The layout test needs the TV's JSON-C library and linking with `-ldl`.
+The native tests cover histogram decoding, black bar classification, measured region rectangles and dynamic layout validation. Build each `native/test_*.c` for ARM and run on the TV. The layout test needs the TV's JSON-C library and linking with `-ldl`.
 
 Example:
 
@@ -162,7 +165,7 @@ priority; per-instance LED output still needs verification on the TV.
 
 Save the receiver settings, then select **Test connection**. The test opens a separate nonblocking JSON connection, logs in with the saved token when present, and requests and validates the LED layout. It sends no colors, clears no priorities and acquires no TV capture. Results include success/failure, validated LED count, elapsed time and an actionable error. A successful test verifies connectivity and layout access, not the physical LEDs or FlatBuffer input.
 
-The diagnostic line reports service version/root status, capture transition, playback classification, capture recovery count/time, age of the last histogram output and scheduled retry timing. PicCap reports its own connection status; histogram output age is not PicCap frame age. Color calibration, saturation, brightness and smoothing belong in Hyperion/HyperHDR; HyperDRM keeps neutral gains.
+The diagnostic line reports service version/root status, capture transition, playback classification, capture recovery count/time, age of the last histogram output and scheduled retry timing. PicCap reports its own connection status; histogram output age is not PicCap frame age. Color calibration, saturation, brightness and smoothing belong in Hyperion/HyperHDR; HyperDRM sends the measured colours unchanged.
 
 Before PicCap starts, its endpoint is read through getSettings. Matching settings are reused. Otherwise setSettings updates only address, port and unix-socket:false; the official implementation restarts PicCap itself, so the controller checks status rather than issuing another start. Endpoint changes are saved by PicCap and remain after disabling handover. Changing the receiver stops the managed PicCap session before configuring the new endpoint. Settings errors/timeouts stop PicCap before histogram fallback, with a cooldown to avoid rapid restarts.
 
@@ -200,7 +203,7 @@ In **TV calibration**, select **Calibration** then **Start Auto Calibration**. T
 shows a black reference and 32 white patches around all four edges. Keep the app
 visible and the picture full-screen without zoom or bars. The service temporarily
 disables PicCap handover and bar detection for this measurement, then restores
-normal operation. Cancellation, Back, playback errors and a 110-second service
+normal operation. Cancellation, Back, playback errors and a 180-second service
 lease protect against leaving calibration active after the app closes.
 
 Fresh measurements identify responsive edge regions. Global-only, absent or
@@ -215,6 +218,20 @@ more independently captured regions.
 An explicit app launch with `{"action":"calibrate"}` starts the same visible
 wizard. The calibration video can be reproduced with
 `python build_calibration_video.py --ffmpeg /path/to/ffmpeg`.
+
+To launch that pattern sequence remotely and record the service's live region
+means, install SSH key access for `root` and run:
+
+```sh
+python3 tools/tv_histogram_test.py --tv root@192.168.2.14 --output tv-histogram.jsonl
+```
+
+The tool launches Auto Calibration, polls the service over one SSH connection,
+and writes each fresh 16-region RGB sample and `blackPercent` array as JSONL.
+Pattern phase labels follow the video timeline approximately. It does not save
+the proposed TV profile; use **Save profile** in the app only if you want to
+keep that calibration. The file contains processed service status values, not
+the raw 256-bin histogram counts.
 
 The TV UI separates Overview, Receiver and Calibration. Auto Calibration is also
 linked from Overview. Fields use focusable selection frames; highlighting or
@@ -274,8 +291,8 @@ tests do not replace real LG capture and remote-control validation on a TV.
 
 Histogram near-black handling suppresses colors with a maximum RGB channel of 16 or less, gradually restores brightness between 16 and 32, and preserves brighter colors. This applies only to histogram output; PicCap, receiver calibration and raw calibration samples are unchanged.
 
-Histogram means and spatial blends are evaluated in linear light (IEC 61966-2-1) and encoded once for output. Averaging encoded values under-reports light: a region that straddles two colors reached the LEDs as a dim olive (125,110,35) instead of the bright mix the picture contains (169,147,38), so mixed regions looked darker than their neighbors. Mixed regions now keep the picture's luminance exactly. Conversions use lookup tables built on first use, so the render loop only does arithmetic.
+Region colours and per-LED blends are evaluated in linear light (IEC 61966-2-1) and encoded once for output. Averaging encoded values under-reports light: a region that straddles two colors reached the LEDs as a dim olive (125,110,35) instead of the bright mix the picture contains (169,147,38), so mixed regions looked darker than their neighbors. The generated plane itself never averages: each cell carries one measured region unchanged, so nothing reaches the receiver that the TV did not measure. Only the perimeter profile and the per-LED mapping for Hyperion blend two anchors, and they blend in linear light. Conversions use lookup tables built on first use, so the render loop only does arithmetic.
 
-Thin letterbox detection compares both edges against lit interior histogram samples and requires a consistently dark upper edge for at least two seconds. Histogram probes cannot determine the exact bar height or guarantee detection on every scene.
+Letterbox detection compares both edges against lit interior histogram samples and requires a consistently dark upper edge for at least two seconds. Once a letterbox is confirmed, region 14 measures the bar height and the bar strips are carried in the plane with the colour LG measured there, so the receiver can find them and extend its LEDs. Detection is a histogram heuristic and can still miss a scene that is dark at both edges.
 
 Histogram capture defaults to 50 ms. The Receiver panel provides a saved Capture interval (ms) setting from 25 to 1000 in steps of 25. Existing settings without this field use 50 ms. PicCap capture timing is unchanged.

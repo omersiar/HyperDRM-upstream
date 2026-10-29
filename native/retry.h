@@ -51,4 +51,15 @@ static inline void retry_source_transition(RetryState *state, uint64_t now) {
         state->due = now + 200;
     }
 }
+/* A latch that gates recovery has to expire by itself. A half-open receiver
+ * socket once left the feed dead for minutes: the recovery branch saw the start
+ * latch still set, returned early on every tick, and a retry stayed scheduled
+ * but was never taken. */
+static inline bool latch_expired(uint64_t *since, uint64_t now, uint64_t limit) {
+    if (!*since) {
+        *since = now;
+        return false;
+    }
+    return now - *since >= limit;
+}
 #endif

@@ -45,24 +45,69 @@ static bool status(void *h, void *m, void *ctx) {
                          calibration.rects[i].y0, calibration.rects[i].x1, calibration.rects[i].y1);
     used += snprintf(json + used, sizeof(json) - used, "],\"customRectangleCount\":%u,\"spatialRectangleCount\":%u,"
                                                              "\"customGeometry\":\"%s\","
-                     "\"spatialGeometry\":\"%s\",\"layoutUpdates\":%u,"
+                     "\"spatialGeometry\":\"%s\",\"customCompensate\":%s,"
+                     "\"customActiveMean\":%s,\"colorStat\":\"%s\",\"customHasReference\":%s,"
+                     "\"layoutUpdates\":%u,"
                      "\"lastLayoutCheckAgeMs\":%lld,\"layoutError\":\"%s\","
                      "\"piccapFallbacks\":%u,\"piccapCooldownMs\":%llu,",
                      calibration.rect_count, spatial_rectangles,
                      calibration.rect_geometry ? "rectangles" : "rim",
-                     calibration_rectangles() ? "rectangles" : "rim", layout_updates,
+                     calibration_rectangles() ? "rectangles" : "rim",
+                     calibration.compensate ? "true" : "false",
+                     calibration.active_mean ? "true" : "false",
+                     calibration_stat_key(calibration.color_stat),
+                     calibration.has_reference ? "true" : "false", layout_updates,
                      last_layout_check ? (long long)(now - last_layout_check) : -1, layout_error,
                      piccap_fallbacks,
                      (unsigned long long)(handover_cooldown > now ? handover_cooldown - now : 0));
+    used += snprintf(json + used, sizeof(json) - used, "\"customBlack\":[");
+    for (unsigned i = 0; calibration.has_reference && i < 16 && used + 24 < (int)sizeof(json); i++)
+        used += snprintf(json + used, sizeof(json) - used, "%s[%u,%u,%u]", i ? "," : "",
+                         calibration.black[i][0], calibration.black[i][1], calibration.black[i][2]);
+    used += snprintf(json + used, sizeof(json) - used, "],\"customWhite\":[");
+    for (unsigned i = 0; calibration.has_reference && i < 16 && used + 24 < (int)sizeof(json); i++)
+        used += snprintf(json + used, sizeof(json) - used, "%s[%u,%u,%u]", i ? "," : "",
+                         calibration.white[i][0], calibration.white[i][1], calibration.white[i][2]);
+    used += snprintf(json + used, sizeof(json) - used, "],");
+    used += snprintf(json + used, sizeof(json) - used, "\"histIds\":[");
+    for (unsigned i = 0; i < 16 && used + 12 < (int)sizeof(json); i++)
+        used += snprintf(json + used, sizeof(json) - used, "%s%u", i ? "," : "",
+                         capture_ctx.hist_ids[i]);
+    used += snprintf(json + used, sizeof(json) - used, "],");
     used += snprintf(json + used, sizeof(json) - used, "\"calibrationMessage\":\"%s\",", report);
     used += snprintf(json + used, sizeof(json) - used,
-                     "\"calibrationDraft\":{\"model\":\"%s\",\"points\":[",
-                     calibration_ctx.draft.model);
+                     "\"calibrationDraft\":{\"model\":\"%s\",\"geometry\":\"%s\",\"points\":[",
+                     calibration_ctx.draft.model,
+                     calibration_ctx.draft.rect_geometry ? "rectangles" : "rim");
     for (unsigned i = 0; i < calibration_ctx.draft.count; i++)
         used += snprintf(json + used, sizeof(json) - used, "%s{\"position\":%.12g,\"region\":%u}",
                          i ? "," : "", calibration_ctx.draft.points[i].position,
                          calibration_ctx.draft.points[i].region);
-    used += snprintf(json + used, sizeof(json) - used, "]},\"receiverStreamConnected\":%s,",
+    used += snprintf(json + used, sizeof(json) - used, "],\"rectangles\":[");
+    for (unsigned i = 0; i < calibration_ctx.draft.rect_count && used + 96 < (int)sizeof(json); i++)
+        used += snprintf(json + used, sizeof(json) - used,
+                         "%s{\"region\":%u,\"x0\":%.6g,\"y0\":%.6g,\"x1\":%.6g,\"y1\":%.6g}",
+                         i ? "," : "", calibration_ctx.draft.rects[i].region,
+                         calibration_ctx.draft.rects[i].x0, calibration_ctx.draft.rects[i].y0,
+                         calibration_ctx.draft.rects[i].x1, calibration_ctx.draft.rects[i].y1);
+    used += snprintf(json + used, sizeof(json) - used, "],\"compensate\":%s",
+                     calibration_ctx.draft.compensate ? "true" : "false");
+    used += snprintf(json + used, sizeof(json) - used, ",\"activeMean\":%s",
+                     calibration_ctx.draft.active_mean ? "true" : "false");
+    if (calibration_ctx.draft.has_reference) {
+        used += snprintf(json + used, sizeof(json) - used, ",\"black\":[");
+        for (unsigned i = 0; i < 16 && used + 24 < (int)sizeof(json); i++)
+            used += snprintf(json + used, sizeof(json) - used, "%s[%u,%u,%u]", i ? "," : "",
+                             calibration_ctx.draft.black[i][0], calibration_ctx.draft.black[i][1],
+                             calibration_ctx.draft.black[i][2]);
+        used += snprintf(json + used, sizeof(json) - used, "],\"white\":[");
+        for (unsigned i = 0; i < 16 && used + 24 < (int)sizeof(json); i++)
+            used += snprintf(json + used, sizeof(json) - used, "%s[%u,%u,%u]", i ? "," : "",
+                             calibration_ctx.draft.white[i][0], calibration_ctx.draft.white[i][1],
+                             calibration_ctx.draft.white[i][2]);
+        used += snprintf(json + used, sizeof(json) - used, "]");
+    }
+    used += snprintf(json + used, sizeof(json) - used, "},\"receiverStreamConnected\":%s,",
                      stream.stage == STREAM_SUBSCRIBED ? "true" : "false");
     used += snprintf(json + used, sizeof(json) - used,
                      "\"sampleSequence\":%u,\"sampleAgeMs\":%lld,\"holdingColors\":%s,"
@@ -95,7 +140,7 @@ static bool status(void *h, void *m, void *ctx) {
         "\"lastRecoveryMs\":%llu,\"endpoint\":\"%s\",\"host\":\"%s\",\"port\":%u,"
         "\"receiver\":\"%s\",\"output\":\"%s\",\"flatbufferConnected\":%s,"
         "\"tokenSet\":%s,\"piccapTargetCompatible\":%s,"
-        "\"priority\":%d,\"uid\":%u,\"drmVerified\":false,\"mappingVerified\":false,"
+        "\"priority\":%d,\"uid\":%u,"
         "\"outputColor\":[%u,%u,%u],\"error\":\"%s\",\"regions\":[",
         (capture_ctx.handle || capture_source == SOURCE_PICCAP) ? "true" : "false",
         capture_ctx.color_valid ? "true" : "false", capture_ctx.frames, capture_ctx.recoveries,
@@ -115,12 +160,27 @@ static bool status(void *h, void *m, void *ctx) {
     for (int i = 0; i < 16; i++)
         used += snprintf(json + used, sizeof(json) - used, "%s%u", i ? "," : "",
                          capture_ctx.black_percent[i]);
-    snprintf(json + used, sizeof(json) - used,
-             "],\"preset\":%u,\"saturationGain\":1.0,\"brightnessGain\":1.0,"
+    /* Which measurement each plane cell came from. A zero here means that window
+     * never wins its own area, which is what a superset window does. */
+    used += snprintf(json + used, sizeof(json) - used, "],\"edgeOwnership\":[");
+    if (used > 0 && used < (int)sizeof(json)) {
+        const unsigned *ownership = edge_ownership_cached();
+        for (int i = 0; i < 16; i++)
+            used += snprintf(json + used, sizeof(json) - used, "%s%u", i ? "," : "",
+                             ownership[i]);
+    }
+    used += snprintf(json + used, sizeof(json) - used,
+             "],\"preset\":%u,"
              "\"spatialInterpolation\":%s,\"blackBarDetection\":true,\"autostart\":%s,"
              "\"retryScheduled\":%s,\"retryPaused\":%s,\"retryBlocked\":%s,\"retryAttempts\":%u,"
              "\"piccapInstalled\":%s,\"piccapHandover\":%s,\"piccapConnected\":%s,\"activeSource\":"
-             "\"%s\",\"playbackProtection\":\"%s\",\"letterboxDetected\":%s}",
+             "\"%s\",\"playbackProtection\":\"%s\",\"letterboxDetected\":%s,"
+             /* Requested versus actual feed cadence, and where a slow tick goes:
+              * vtGet is LG's histogram read, render is plane build, send is the
+              * socket write. A feed that feels late shows up here first. */
+             "\"captureWanted\":%s,\"recoveryAttempts\":%u,\"vtGetMs\":%u,\"renderMs\":%u,"
+             "\"sendMs\":%u,\"tickMs\":%u,\"sampleGapMs\":%u,\"outputGapMs\":%u,"
+             "\"sampleFps\":%u,\"outputFps\":%u,\"receiverStage\":\"%s\",\"outputRegions\":[",
              capture_ctx.preset, receiver_layout.interpolation ? "true" : "false",
              boot_enabled() ? "true" : "false", retries.due ? "true" : "false",
              retries.paused ? "true" : "false", retries.blocked ? "true" : "false",
@@ -130,6 +190,27 @@ static bool status(void *h, void *m, void *ctx) {
              protection == PLAYBACK_PROTECTED ? "protected"
              : protection == PLAYBACK_CLEAR   ? "non-secure decoder"
                                               : "unknown",
-             capture_ctx.handle && capture_ctx.letterbox_mode ? "true" : "false");
+             capture_ctx.handle && capture_ctx.letterbox_mode ? "true" : "false",
+             capture_ctx.wanted ? "true" : "false", capture_ctx.recovery_attempts,
+             capture_ctx.vt_get_us / 1000, capture_ctx.plane_us / 1000,
+             capture_ctx.send_us / 1000, capture_ctx.tick_us / 1000, capture_ctx.sample_gap_ms,
+             capture_ctx.output_gap_ms,
+             capture_ctx.sample_gap_ms ? 1000 / capture_ctx.sample_gap_ms : 0,
+             capture_ctx.output_gap_ms ? 1000 / capture_ctx.output_gap_ms : 0,
+             target_flatbuffer(&target)
+                 ? (receiver_runtime.flatbuffer.stage == FB_READY        ? "ready"
+                    : receiver_runtime.flatbuffer.stage == FB_CONNECTING ? "connecting"
+                    : receiver_runtime.flatbuffer.stage == FB_REGISTERING
+                        ? "registering"
+                    : receiver_runtime.flatbuffer.stage == FB_FAILED ? "failed"
+                                                                     : "idle")
+                 : (receiver_runtime.output.stage == OUTPUT_READY  ? "ready"
+                    : receiver_runtime.output.stage == OUTPUT_FAILED ? "failed"
+                                                                     : "connecting"));
+    for (int i = 0; i < 16 && used > 0 && used < (int)sizeof(json); i++)
+        used += snprintf(json + used, sizeof(json) - used, "%s[%u,%u,%u]", i ? "," : "",
+                         capture_ctx.rendered[i][0], capture_ctx.rendered[i][1],
+                         capture_ctx.rendered[i][2]);
+    used += snprintf(json + used, sizeof(json) - used, "]}");
     return respond(h, m, json);
 }

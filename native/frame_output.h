@@ -7,13 +7,15 @@
 typedef struct {
     char *line;
     unsigned char *plane;
+    unsigned width, height;
 } OutputFrame;
 
 static OutputFrame frame_build(const unsigned char colors[16][3], const LedBlend *mapping,
                                unsigned count, unsigned duration) {
-    OutputFrame frame = {NULL, NULL};
+    OutputFrame frame = {NULL, NULL, 0, 0};
     if (target_flatbuffer(&target)) {
-        frame.plane = malloc((size_t)SPATIAL_PIXELS * 3);
+        spatial_dimensions(&frame.width, &frame.height);
+        frame.plane = malloc((size_t)frame.width * frame.height * 3);
         if (frame.plane)
             spatial_plane(colors, frame.plane);
         return frame;
@@ -26,11 +28,13 @@ static void frame_release(OutputFrame *frame) {
     free(frame->plane);
     frame->line = NULL;
     frame->plane = NULL;
+    frame->width = frame->height = 0;
 }
 static bool frame_send(const OutputFrame *frame, unsigned duration, uint64_t now) {
     if (target_flatbuffer(&target))
         return frame->plane && fb_out_frame(&receiver_runtime.flatbuffer, frame->plane,
-                                            SPATIAL_WIDTH, SPATIAL_HEIGHT, (int)duration, now);
+                                            (int)frame->width, (int)frame->height, (int)duration,
+                                            now);
     return frame->line && output_frame(&receiver_runtime.output, frame->line);
 }
 static bool receiver_begin(uint64_t now) {

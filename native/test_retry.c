@@ -27,5 +27,10 @@ int main(void){
  assert(retry_take(&state,now+1000));retry_failure(&state,now+1000);assert(state.due==now+6000);
  retry_pause(&state);retry_source_transition(&state,now);assert(!state.due);
  retry_reset(&state);state.blocked=true;retry_source_transition(&state,now);assert(!state.due);
- puts("PASS: startup retries, bounded rapid source recovery, Stop pause and cleanup safety block");
+ uint64_t latch=0;
+ assert(!latch_expired(&latch,500,5000));assert(latch==500);
+ assert(!latch_expired(&latch,5499,5000));assert(latch_expired(&latch,5500,5000));
+ latch=0;assert(!latch_expired(&latch,0,0));assert(latch==0);assert(!latch_expired(&latch,1,5));
+ puts("PASS: startup retries, bounded rapid source recovery, Stop pause, cleanup safety block, "
+      "latch deadlines");
 }

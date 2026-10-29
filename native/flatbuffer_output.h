@@ -35,6 +35,10 @@ static void fb_out_close(FlatbufferOutput *o) {
     o->replies_used = o->queue_length = o->queue_sent = o->pending_length = 0;
     o->queue_image = o->pending_image = false;
     o->deadline = 0;
+    /* A failed close-transaction used to leave `closing` set, and `closing`
+     * gates the recovery branch in the capture tick. Clearing it here means no
+     * socket failure can keep the service from reconnecting. */
+    o->closing = false;
 }
 /* The scratch buffer is reused between sessions; release it once at shutdown. */
 static void fb_out_release(FlatbufferOutput *o) {

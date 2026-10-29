@@ -1,7 +1,7 @@
 /* Luna API handlers. Included after the shared runtime context. */
 #include "service_calibration.h"
 static bool start_failure(void *h, void *m, const char *message) {
-    retry_update(&retries, boot_enabled() && geteuid() == 0, false, milliseconds());
+    retry_update(&retries, capture_ctx.wanted, false, milliseconds());
     char json[512];
     snprintf(
         json, sizeof(json),
@@ -18,6 +18,8 @@ static bool start(void *h, void *m, void *ctx) {
                        "settings to configure the receiver\"}");
     if (m)
         retry_reset(&retries);
+    /* The user asked for a feed, so recovery continues until they stop it. */
+    capture_ctx.wanted = true;
     if (piccap_owned)
         return respond(h, m, "{\"returnValue\":true,\"running\":true,\"activeSource\":\"PicCap\"}");
     if (capture_ctx.handle)
@@ -82,6 +84,7 @@ static bool initialize_capture(void *h, void *m) {
 static bool stop(void *h, void *m, void *ctx) {
     (void)ctx;
     calibration_ctx.until = 0;
+    capture_ctx.wanted = false;
     retry_pause(&retries);
     bool bridging = bridge_phase != BRIDGE_IDLE;
     stream_close(milliseconds());

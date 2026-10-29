@@ -20,7 +20,6 @@
 #include "version.h"
 #include "histogram.h"
 #include "blackbars.h"
-#include "color_boost.h"
 #include "interpolation.h"
 #include "layout.h"
 #include "autostart.h"
@@ -85,6 +84,13 @@ static uint64_t milliseconds(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (uint64_t)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
+/* The millisecond clock is too coarse to show where a capture tick spends its
+ * time, and the feed rate is the property users notice first. */
+static uint64_t microseconds(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000;
 }
 static char last_error[256];
 static volatile sig_atomic_t quitting;
@@ -175,6 +181,7 @@ static void release_capture(bool clear_output) {
     capture_ctx.color_valid = false;
     memset(capture_ctx.rgb, 0, sizeof(capture_ctx.rgb));
     memset(capture_ctx.sent_rgb, 0, sizeof(capture_ctx.sent_rgb));
+    stabilize_reset(&capture_ctx.output_filter);
     receiver_runtime.starting = false;
     receiver_runtime.clear_pending = false;
     receiver_stop(milliseconds(), clear_output);
@@ -202,6 +209,8 @@ static bool respond(void *h, void *m, const char *s) {
 #include "source_bridge.h"
 #include "frame_output.h"
 #include "service_api.h"
+#include "service_histograms.h"
+#include "service_presets.h"
 #include "dark_color.h"
 #include "capture_loop.h"
 static void *symbol(void *lib, const char *name) {
@@ -254,6 +263,8 @@ int main(void) {
     Method methods[] = {{"start", start, 0},
                         {"stop", stop, 0},
                         {"status", status, 0},
+                        {"histograms", histograms, 0},
+                        {"presetScan", preset_scan, 0},
                         {"autostart", autostart, 0},
                         {"restartService", restart_service, 0},
                         {"handover", handover, 0},
@@ -271,6 +282,9 @@ int main(void) {
         return 3;
     }
     service_handle = handle;
+    /* Autostart decides whether a boot-started service wants capture at all;
+     * from then on the user's start/stop calls own that decision. */
+    capture_ctx.wanted = boot_enabled() && geteuid() == 0;
     if (!boot_enabled())
         retry_pause(&retries);
     timer(25, tick, NULL);

@@ -3,6 +3,10 @@
 The built-in LG G4 profile is measured. Other models do not have verified spatial
 profiles yet. Auto uses uniform average colors on an unknown model, unless an
 imported custom profile matches its exact reported model identifier.
+`65QNED87A6B.BEUFLJP.json` is the profile that Auto Calibration measured on the
+tested 65QNED87A6B on webOS 24: ten rim anchors and all sixteen region
+rectangles. Import it only for the exact model identifier; a model match alone
+does not establish correctness on another panel, SoC or firmware.
 
 To import measured data, select Custom in the TV app, paste the profile JSON,
 and select Save profile. Auto subsequently uses the custom profile on that exact
@@ -49,19 +53,14 @@ calibration panel (custom profile only). Recalibrating replaces the point list
 but keeps the selected geometry; use the same button to compare both models on
 the receiver's LED preview and keep the one that matches the LEDs.
 
-### Derived blocks
-
-Selecting rectangles on an ordinary calibrated profile needs no extra data: one
-block is derived per rim anchor, covering the arc up to its neighbouring anchors
-and deepened inwards by `REGION_BLOCK_DEPTH` (0.19 of the screen). Pixels outside
-every block use the nearest block centre. This removes the cones and limits each
-sample to its own edge segment, but it is an approximation - the rim calibration
-does not measure how far into the picture a region reaches.
+Region rectangles are painted only from actual measurements. Selecting the mode
+without measured extents falls back to the perimeter model: blocks invented
+from rim anchors produced a Voronoi mosaic that did not describe the picture.
 
 ### Measured rectangles
 
-A profile may carry the actual sampling rectangle of each region; those always
-take precedence over derived blocks:
+Auto Calibration measures the actual sampling rectangle of every LG histogram
+region. The profile stores them next to the rim anchors:
 
 ```json
 {
@@ -70,6 +69,8 @@ take precedence over derived blocks:
     {"position": 3.5, "region": 15}
   ],
   "geometry": "rectangles",
+  "compensate": false,
+  "activeMean": false,
   "rectangles": [
     {"region": 15, "x0": 0.0, "y0": 0.41, "x1": 0.19, "y1": 0.79},
     {"region": 4, "x0": 0.19, "y0": 0.3, "x1": 0.38, "y1": 0.82}
@@ -80,12 +81,17 @@ take precedence over derived blocks:
 - 1-16 rectangles, at most one per region index 0-15.
 - Coordinates are normalized to the full screen: `0 <= x0 < x1 <= 1` and
   `0 <= y0 < y1 <= 1` (`x` rightwards, `y` downwards).
-- Rectangles may overlap, as LG's own regions do. Each pixel is the `1/area`
-  weighted average of the rectangles covering it, so a small local rectangle
-  dominates a large nested one. Pixels outside every rectangle use the nearest
-  measured centre.
+- Rectangles may overlap, as LG's own regions do. Each rectangle mean is a box
+  average of the pixels it covers. The renderer never mixes two windows: it
+  picks the smallest measured rectangle that contains the point and copies that
+  colour, so every pixel sent to the receiver is one of the sixteen measurements
+  unchanged. Outside every rectangle it uses the nearest centre. `status`
+  reports `edgeOwnership`, the number of plane cells each measurement owns, so a
+  window that never wins its own area is visible instead of silent.
 - `"geometry"` defaults to `rectangles` when the list is present; `"geometry":
   "rim"` keeps the rectangles stored but renders the perimeter model.
+- Without a `rectangles` list the rectangle mode renders the perimeter model.
+  The service never invents rectangle extents from the rim anchors.
 - A new `points` list discards rectangles measured for the previous one. To keep
   them, keep the `rectangles` array in the same JSON that carries the new points.
 - Only a measured custom profile uses this geometry. Auto, G4 and Average ignore
@@ -93,22 +99,45 @@ take precedence over derived blocks:
   processing to the plane.
 - The status line shows the active geometry, and `status` reports
   `customRectangleCount` (imported), `spatialRectangleCount` (rendered),
-  `customGeometry` and `spatialGeometry`.
+  `customGeometry`, `spatialGeometry`, `customCompensate` and
+  `customHasReference`.
+- Optional `black` and `white` arrays each hold 16 `[r,g,b]` entries measured on
+  a full-black and full-white frame. `compensate` is the user toggle; it is off
+  by default. When on, each region mean is normalised in linear light against
+  the matching reference, which neutralises a Warm picture mode or Eye
+  Comfort/Blue Light Reduction on the LEDs. Calibration itself always samples
+  raw values.
+- `activeMean` (off by default) averages only the bins above the measured black
+  level, renormalising the remaining counts. It reduces black-background
+  dilution without changing channel ratios. A 12-level codec-noise floor and a
+  squared fade keep near-black dither from switching the estimate between
+  darkness and the lit object, which caused visible flicker in large regions.
+  Calibration bypasses it.
+- The profile JSON limit is 8 KiB, enough for 16 points, 16 rectangles and the
+  32 reference triplets.
 
 ### Measuring extents
 
-The coordinate ramp only yields each region's centre. Show a frame that is white
-left of `s` and black right of it; each region's mean colour is then the fraction
-of its area left of `s`. Sweeping `s` gives that region's horizontal extent, and
-repeating the sweep with top/bottom splits gives the vertical extent. Two split
-positions per axis are enough per region because the response is linear.
+Auto Calibration measures the black and white references, then plays nine
+vertical and nine horizontal white/black splits. At split `s`, the share of a
+region's pixels that is black is the fraction of its rectangle to the right
+(or below) `s`, so a bounded least-squares fit recovers `x0/x1` and `y0/y1` with
+no gamma assumptions. The response is linear, so nine positions also handle
+regions whose response saturates at either end. The fit must stay within
+0.12 RMSE and measure at least 4 regions, otherwise the proposal keeps the
+perimeter model.
 
 ## Guided measurement
 
 The app's auto calibration uses an actual local video plane, not UI overlays.
 It collects a black reference and fresh samples from 32 perimeter patches,
-rejects global responses, and derives sorted positions from each region's local
-response peak. A candidate must cover all four edges. The resulting JSON is a
-proposal until Save profile is selected. Use Validate profile after saving and
-check all four color quadrants before contributing the profile. Cancellation and
-failed measurement preserve the saved profile.
+rejects global responses, and derives sorted rim positions from each region's
+local response peak. A candidate must cover all four edges. The same run then
+measures the 16 region rectangles from the split sweeps. Measurement takes
+about two minutes. A single missed status reply does not discard the run: a
+missing patch is treated as the black reference, and a missing extent step is
+skipped by the fit.
+
+The resulting JSON is a proposal until Save profile is selected. Use Validate
+profile after saving and check all four color quadrants before contributing the
+profile. Cancellation and failed measurement preserve the saved profile.

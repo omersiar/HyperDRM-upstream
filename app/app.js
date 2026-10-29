@@ -10,7 +10,7 @@ function checkServiceVersion(result) {
     warning.style.display = versionCompatible ? 'none' : 'block';
     document.getElementById('reloadService').style.display = versionCompatible ? 'none' : 'inline-block';
     warning.textContent = versionCompatible ? '' : 'App ' + HYPERDRM_APP_VERSION + ' / service ' + (result.version || 'unknown') + '. The installed service does not match this app. Finish the update, then select Reload service before changing settings. Reloading briefly stops ambient lighting.';
-    ['start', 'autostart', 'handover', 'saveTarget', 'testConnection', 'calibrate', 'validateCalibration', 'saveProfile'].forEach(function(id) {
+    ['start', 'autostart', 'handover', 'saveTarget', 'testConnection', 'calibrate', 'validateCalibration', 'saveProfile', 'compensate', 'activeMean'].forEach(function(id) {
         var button = document.getElementById(id);
         if (!versionCompatible) {
             button.versionBlocked = true;
@@ -36,6 +36,8 @@ var targetDirty = false,
 var profileDirty = false,
     profile = 'auto',
     geometry = 'rim',
+    compensate = false,
+    activeMean = false,
     advancedProfile = false;
 var profileNames = {
     auto: 'Auto',
@@ -48,10 +50,26 @@ var geometryNames = {
     rectangles: 'Region rectangles'
 };
 
+function showCompensate() {
+    var button = document.getElementById('compensate');
+    if (!button) return;
+    button.textContent = 'Colour cast compensation: ' + (compensate ? 'On' : 'Off');
+    button.disabled = profile !== 'custom';
+}
+
+function showActiveMean() {
+    var button = document.getElementById('activeMean');
+    if (!button) return;
+    button.textContent = 'Ignore black background: ' + (activeMean ? 'On' : 'Off');
+    button.disabled = profile !== 'custom';
+}
+
 function showProfile() {
     document.getElementById('profile').textContent = 'Profile: ' + profileNames[profile];
     document.getElementById('geometry').textContent = 'Geometry: ' + geometryNames[geometry];
     document.getElementById('geometry').disabled = profile !== 'custom';
+    showCompensate();
+    showActiveMean();
     var visible = profile === 'custom' && advancedProfile;
     document.getElementById('customEditor').style.display = visible ? 'block' : 'none';
     document.getElementById('customProfile').disabled = !visible;
@@ -130,8 +148,16 @@ function display(result) {
         if (result.customGeometry === 'rectangles') stored.geometry = 'rectangles';
         else if (result.customRectangles && result.customRectangles.length) stored.geometry = 'rim';
         if (result.customRectangles && result.customRectangles.length) stored.rectangles = result.customRectangles;
+        compensate = !!result.customCompensate;
+        activeMean = !!result.customActiveMean;
+        stored.compensate = compensate;
+        stored.activeMean = activeMean;
+        if (result.customBlack && result.customBlack.length) stored.black = result.customBlack;
+        if (result.customWhite && result.customWhite.length) stored.white = result.customWhite;
         document.getElementById('customProfile').value = JSON.stringify(stored, null, 2);
     }
+    showCompensate();
+    showActiveMean();
     if (result.effectiveCalibration) document.getElementById('profileStatus').textContent = 'TV: ' + (result.tvModel || 'Unknown') + ' · Active profile: ' + profileNames[result.effectiveCalibration] + (result.effectiveCalibration === 'custom' ? ' · ' + geometryNames[result.spatialGeometry === 'rectangles' ? 'rectangles' : 'rim'] : '') + (result.effectiveCalibration === 'average' ? ' · Spatial calibration needed for this model' : '');
 
     if (result.host && !targetDirty) {
@@ -175,7 +201,7 @@ function display(result) {
     else if (result.returnValue !== false) document.getElementById('status').textContent += ' · No current color output';
     if (result.blackBarDetection && result.running) document.getElementById('status').textContent += result.letterboxDetected ? ' · Top/bottom black bars detected' : ' · Full-screen capture';
     if (result.spatialInterpolation) document.getElementById('status').textContent += ' · Smooth color transitions';
-    if (result.spatialGeometry === 'rectangles') document.getElementById('status').textContent += ' · Region rectangles (1/area)';
+    if (result.spatialGeometry === 'rectangles') document.getElementById('status').textContent += ' · Region rectangles (reconstructed)';
     if (result.holdingColors) document.getElementById('status').textContent += ' · Holding last valid colors (missing data)';
     if (result.sourceFade) document.getElementById('status').textContent += ' · Blending capture sources';
     if (result.retryScheduled) document.getElementById('status').textContent += ' · Retrying receiver or capture startup';
@@ -404,6 +430,12 @@ document.getElementById('saveProfile').onclick = function() {
             data.points = parsed.points;
             data.geometry = parsed.geometry === 'rectangles' ? 'rectangles' : parsed.geometry === 'rim' ? 'rim' : geometry;
             if (parsed.rectangles && parsed.rectangles.length) data.rectangles = parsed.rectangles;
+            if (parsed.black && parsed.white) {
+                data.black = parsed.black;
+                data.white = parsed.white;
+            }
+            data.compensate = parsed.compensate === true || compensate;
+            data.activeMean = parsed.activeMean === true || activeMean;
         } catch (e) {
             showActionError('Custom profile must be valid JSON.');
             return;
@@ -441,6 +473,40 @@ document.getElementById('geometry').onclick = function() {
     }
     showProfile();
 };
-setupRemoteNavigation(['overviewTab', 'receiverTab', 'calibrationTab', 'reloadService', 'grantRoot', 'start', 'stop', 'refresh', 'autostart', 'handover', 'calibrationShortcut', 'receiver', 'output', 'hostField', 'portField', 'piccapPortField', 'captureIntervalField', 'tokenField', 'clearToken', 'saveTarget', 'testConnection', 'calibrate', 'validateCalibration', 'profile', 'saveProfile', 'editProfile', 'geometry', 'customProfileField', 'cancelCalibration'].map(function(id) {
+var compensateButton = document.getElementById('compensate');
+if (compensateButton) compensateButton.onclick = function() {
+    compensate = !compensate;
+    profileDirty = true;
+    var field = document.getElementById('customProfile'),
+        stored = null;
+    try {
+        stored = JSON.parse(field.value);
+    } catch (e) {
+        stored = null;
+    }
+    if (stored && typeof stored === 'object') {
+        stored.compensate = compensate;
+        field.value = JSON.stringify(stored, null, 2);
+    }
+    showProfile();
+};
+var activeMeanButton = document.getElementById('activeMean');
+if (activeMeanButton) activeMeanButton.onclick = function() {
+    activeMean = !activeMean;
+    profileDirty = true;
+    var field = document.getElementById('customProfile'),
+        stored = null;
+    try {
+        stored = JSON.parse(field.value);
+    } catch (e) {
+        stored = null;
+    }
+    if (stored && typeof stored === 'object') {
+        stored.activeMean = activeMean;
+        field.value = JSON.stringify(stored, null, 2);
+    }
+    showProfile();
+};
+setupRemoteNavigation(['overviewTab', 'receiverTab', 'calibrationTab', 'reloadService', 'grantRoot', 'start', 'stop', 'refresh', 'autostart', 'handover', 'calibrationShortcut', 'receiver', 'output', 'hostField', 'portField', 'piccapPortField', 'captureIntervalField', 'tokenField', 'clearToken', 'saveTarget', 'testConnection', 'calibrate', 'validateCalibration', 'profile', 'saveProfile', 'editProfile', 'geometry', 'compensate', 'activeMean', 'customProfileField', 'cancelCalibration'].map(function(id) {
     return document.getElementById(id);
 }), document, window);

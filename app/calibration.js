@@ -79,3 +79,93 @@ function calibrationAverage(samples) {
         }, 0) / samples.length;
     });
 }
+
+/* Optional mean for the extent sweeps: a single missed step must not discard
+ * the whole measurement, so empty sets return null instead of throwing. */
+function calibrationMean(samples) {
+    if (!samples || !samples.length) return null;
+    return samples[0].map(function(_, r) {
+        return samples.reduce(function(sum, s) {
+            return sum + s[r];
+        }, 0) / samples.length;
+    });
+}
+
+/* Mean of a 16x3 RGB matrix, used for the black/white reference phases. */
+function calibrationMeanRgb(samples) {
+    if (!samples || !samples.length) return null;
+    return samples[0].map(function(_, r) {
+        return samples[0][r].map(function(_, c) {
+            return samples.reduce(function(sum, s) {
+                return sum + s[r][c];
+            }, 0) / samples.length;
+        });
+    });
+}
+
+/* Fit f(s) = clamp((s-x0)/(x1-x0), 0, 1) with 0 <= x0 < x1 <= 1. The black
+ * share of a white/black split is an exact area fraction, so the two edges are
+ * recovered without gamma assumptions. The bounded grid also handles regions
+ * whose response saturates before the tenth or after the ninetieth split. */
+function calibrationExtentFit(fractions) {
+    var best = null;
+    for (var a = 0; a <= 100; a++) {
+        for (var w = 1; w <= 100 - a; w++) {
+            var x0 = a / 100,
+                x1 = (a + w) / 100,
+                sum = 0,
+                count = 0;
+            for (var i = 0; i < fractions.length; i++) {
+                var f = fractions[i];
+                if (f === null) continue;
+                var s = (i + 1) / 10,
+                    expected = s <= x0 ? 0 : s >= x1 ? 1 : (s - x0) / (x1 - x0),
+                    delta = f - expected;
+                sum += delta * delta;
+                count++;
+            }
+            if (!count) return null;
+            var rmse = Math.sqrt(sum / count);
+            if (!best || rmse < best.rmse) best = {
+                x0: x0,
+                x1: x1,
+                rmse: rmse
+            };
+        }
+    }
+    return best;
+}
+
+function calibrationFractions(black, contrast, region, sets) {
+    return sets.map(function(set) {
+        if (!set) return null;
+        return Math.max(0, Math.min(1, (black[region] - set[region]) / contrast));
+    });
+}
+
+/* Recover the actual sampling rectangle of each LG histogram region from nine
+ * vertical and nine horizontal white/black splits. black and white are the
+ * per-region black percentages measured on a full-black and a full-white
+ * frame; vertical[k]/horizontal[k] are the per-region black percentages at
+ * split position (k+1)/10. Returns 4-16 rectangles. */
+function calibrationExtents(black, white, vertical, horizontal) {
+    if (!black || !white || black.length !== 16 || white.length !== 16 || !vertical || !horizontal || vertical.length !== 9 || horizontal.length !== 9) throw new Error('Incomplete extent measurements. Keep the video full-screen and repeat calibration.');
+    var rectangles = [];
+    for (var region = 0; region < 16; region++) {
+        var contrast = black[region] - white[region];
+        if (!(contrast > 10)) continue;
+        var xFit = calibrationExtentFit(calibrationFractions(black, contrast, region, vertical)),
+            yFit = calibrationExtentFit(calibrationFractions(black, contrast, region, horizontal));
+        if (!xFit || !yFit || xFit.rmse > .12 || yFit.rmse > .12) continue;
+        if (xFit.x1 - xFit.x0 < .02 || yFit.x1 - yFit.x0 < .02) continue;
+        rectangles.push({
+            region: region,
+            x0: xFit.x0,
+            y0: yFit.x0,
+            x1: xFit.x1,
+            y1: yFit.x1
+        });
+    }
+    if (rectangles.length < 4) throw new Error('No reliable region extents on this TV. Keep the perimeter profile.');
+    return rectangles;
+}

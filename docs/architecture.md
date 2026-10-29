@@ -12,6 +12,8 @@ Formatting must preserve include order (`SortIncludes: Never`).
 | service_calibration.h | Bounded calibration lease, proposals, profiles, model discovery |
 | service_status.h | Read-only status serialization |
 | capture_loop.h | Scheduler, histogram acquisition, missing-data recovery and output |
+| layout.h | Window geometry: rectangle selection, letterbox projection, rim interpolation |
+| edge_feed.h | Builds the output plane by copying measurements, never blending them |
 | frame_output.h | Transport selection between the JSON and FlatBuffer output paths |
 | receiver_output.h | Main asynchronous connection, transaction matching and frame coalescing |
 | flatbuffer.h | Back-to-front FlatBuffers writer for HyperHDR's Request schema |
@@ -49,6 +51,28 @@ real black bypasses the fade. The opposite direction seeds histogram continuity
 from a fresh receiver frame. Capture ownership remains in handover.h; the observer
 never acquires LG capture. Stop cancels the bridge and releases owned resources.
 
+Each region arrives as 768 counters, and the pipeline reduces them to one 8-bit
+code per channel. That reduction is the only irreversible loss in the path and it
+is a choice: half a screen of black beside half of white has exactly the same mean
+as flat mid-grey. `calibration.color_stat` selects what to keep — `mean` (default),
+`p50`, `p90` or `peak`, via `histogram_linear_percentile()` — while `active_mean`
+keeps precedence for the ignore-black behaviour. A percentile returns the code of
+the chosen bin, so it round-trips through the encode table unchanged. Everything
+downstream is then lossless with respect to those sixteen colours: `edge_feed.h`
+copies a measured colour per cell and never invents one.
+
+The statistic is a display choice and nothing else. `capture_ctx.detect_rgb` keeps
+the plain mean for the letterbox probe and the r14 bar meter, because both were
+calibrated against it: a `p50` reading is 0 in a dark-but-lit interior and hid
+every letterbox, and a `peak` reading treats one bright pixel in the bar strip as
+"no bar". Decisions therefore do not move when the feed's summary changes.
+
+The stabiliser takes a jump of `STABILIZE_JUMP` (32) codes at once, because a cut
+is orders of magnitude larger than the one-code dither the filter exists to remove;
+smaller changes still have to survive the three-sample confirm. Measured on the
+flash stimulus, the raw-to-output lag fell from 110 ms typical (320 ms worst) to
+0-60 ms, with no loss of dither rejection.
+
 The UI calibration session uses Starting → Waiting → Measuring/Validating →
 Committing → finished. Each asynchronous callback checks its original session
 identity, so a cancelled session cannot modify a newly started session. Proposals
@@ -73,6 +97,26 @@ eight-message budget and 2 MiB limit. An ACK can send the newest queued frame in
 the same tick without resetting that byte budget. There is one pending command
 and one replaceable frame, not an unbounded queue. Transaction deadlines are three
 seconds. Shutdown and cancellation release all owned buffers and sockets.
+
+Recovery is driven by intent, not by the autostart hook. `start` sets
+`capture_ctx.wanted`, `stop` clears it, and the tick keeps retrying while that flag
+is set, however long the obstacle lasts: a cast app holds VT_CAPTURE for as long as
+it plays, so a bounded attempt count gave up minutes before the app released it.
+Every latch that gates recovery carries a deadline (`RECOVERY_LATCH_MS`). A stalled
+`starting` or `closing` latch, and a failed connection, are dropped so the retry can
+actually be taken; a half-open receiver socket once left the feed dead with a retry
+permanently scheduled and never taken. `status.receiverStage` and
+`status.recoveryAttempts` expose that state instead of it being silent.
+
+Feed cost lives in the plane build, so it is measured rather than assumed:
+`status` reports `vtGetMs`, `renderMs`, `sendMs`, `tickMs`, `sampleGapMs`,
+`outputGapMs` and both `sampleFps`/`outputFps`. Resolving the geometry per pixel
+per frame cost 60-110 ms of every tick on this TV, because the ARM build is
+soft-float and each rectangle test is a dozen double comparisons. `edge_feed.h`
+resolves the owning measurement once per profile and bar into a cell table, so the
+per-frame work is a table walk: render fell to under a millisecond and the feed went
+from 12 Hz to 30 Hz at a 25 ms capture interval. `outputRegions` reports the colours
+a frame actually carried, which is what makes receiver-visible latency measurable.
 
 The source bridge receives CaptureContext explicitly; layout refresh receives
 ReceiverLayoutContext explicitly. Capture data, continuity, recovery counters and
