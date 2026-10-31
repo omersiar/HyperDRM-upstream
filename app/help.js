@@ -63,7 +63,20 @@ var HELP = {
             'Perimeter blends smoothly around the screen edge and always works. ' +
             'Region rectangles follow the areas your TV really samples, which ' +
             'matches the picture more closely, and falls back to the perimeter ' +
-            'when nothing was measured.'
+            'when nothing was measured. Reconstructed also uses those areas but ' +
+            'solves them for one smooth picture instead of copying the nearest ' +
+            'area, so gradients stay clean and the boundaries between areas stop ' +
+            'showing. It softens real edges that fall on those boundaries, so try ' +
+            'both and keep the one you prefer.'
+    },
+    grade: {
+        title: 'Brightness and colour',
+        body: 'A second pass over the finished colours, in a space where ' +
+            'brightness and colour are separate. Gentle and Strong lift muted ' +
+            'colours most and leave already-strong colours and whites alone, ' +
+            'hold the strip below full panel brightness, and keep a small floor ' +
+            'so a black scene is a glow rather than a hole. Off leaves the ' +
+            'measured colours untouched.'
     },
     compensate: {
         title: 'Colour cast compensation',
@@ -77,7 +90,9 @@ var HELP = {
             'is the plain average and suits most viewing. Active ignores the black ' +
             'background, so a small bright object is not lost in a dark scene. ' +
             'p50, p90 and Peak keep more of the brightest parts, but Peak follows ' +
-            'a single bright pixel and can look jumpy.'
+            'a single bright pixel and can look jumpy. Vivid averages the same ' +
+            'pixels after spreading each channel away from mid-grey, so colours ' +
+            'read stronger without inventing a hue a grey does not have.'
     }
 };
 var helpOpener = null;

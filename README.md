@@ -175,9 +175,19 @@ Hyperion retains its original per-LED color-array output. Receiver IP, JSON port
 
 A custom profile can render its samples as **region rectangles** instead of perimeter
 cones. The mode is chosen with **Geometry** in the TV calibration panel, survives
-recalibration and can be switched back for an A/B comparison; without imported
-rectangles one block per measured rim anchor is derived, and measured rectangle
-data always takes precedence. See [profiles/README.md](profiles/README.md).
+recalibration and can be switched back for an A/B comparison; without measured
+rectangles the perimeter model is used, because a rim anchor does not say how far
+a region reaches inwards. See [profiles/README.md](profiles/README.md).
+
+A third choice, **Reconstructed**, keeps those rectangles but solves them for one
+smooth 32x18 picture instead of copying the nearest window, so the boundaries
+between windows stop showing on the wall. It is a regularised fit
+(`min |A x - m|^2 + 0.01 |L x|^2`, 576x16 map precomputed in
+`native/reconstruct_table.h`), so it softens detail the sixteen averages cannot
+distinguish: it is markedly better on gradients and can look softer than region
+rectangles where a real edge falls on a window boundary. Both stay one button
+away in the panel so the room decides. `tools/histogram_reconstruct.py` scores
+the alternatives against synthetic scenes and regenerates the table.
 
 ## HyperHDR output for every LED hardware instance (unreleased)
 

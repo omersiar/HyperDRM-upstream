@@ -38,11 +38,17 @@ var profileDirty = false,
     geometry = 'rim',
     compensate = false,
     colorStat = 'mean',
+    grade = 'off',
     advancedProfile = false;
 /* How a region's pixels become one value. Ordered as the button cycles; the
  * names match the profile's colorStat key and the service's status reply. */
-var colorStatNames = {mean: 'Mean', active: 'Active', p50: 'p50', p90: 'p90', peak: 'Peak'};
-var colorStatOrder = ['mean', 'active', 'p50', 'p90', 'peak'];
+var colorStatNames = {mean: 'Mean', active: 'Active', p50: 'p50', p90: 'p90', peak: 'Peak', vivid: 'Vivid'};
+/* Vivid sits next to Mean: they are the two everyday choices, and the
+ * percentiles are the ones you go looking for. */
+var colorStatOrder = ['mean', 'vivid', 'active', 'p50', 'p90', 'peak'];
+/* Brightness and colour grading, applied to the finished region colours. */
+var gradeNames = {off: 'Off', gentle: 'Gentle', strong: 'Strong'};
+var gradeOrder = ['off', 'gentle', 'strong'];
 var profileNames = {
     auto: 'Auto',
     g4: 'LG G4 (measured)',
@@ -51,8 +57,12 @@ var profileNames = {
 };
 var geometryNames = {
     rim: 'Perimeter',
-    rectangles: 'Region rectangles'
+    rectangles: 'Region rectangles',
+    smooth: 'Reconstructed'
 };
+/* Order the geometry button cycles through. "smooth" needs the same measured
+ * rectangles as "rectangles"; it only changes how the plane is filled. */
+var geometryOrder = ['rim', 'rectangles', 'smooth'];
 
 function showCompensate() {
     var button = document.getElementById('compensate');
@@ -68,12 +78,20 @@ function showColorStat() {
     button.disabled = profile !== 'custom';
 }
 
+function showGrade() {
+    var button = document.getElementById('grade');
+    if (!button) return;
+    button.textContent = 'Brightness and colour: ' + (gradeNames[grade] || 'Off');
+    button.disabled = profile !== 'custom';
+}
+
 function showProfile() {
     document.getElementById('profile').textContent = 'Profile: ' + profileNames[profile];
     document.getElementById('geometry').textContent = 'Geometry: ' + geometryNames[geometry];
     document.getElementById('geometry').disabled = profile !== 'custom';
     showCompensate();
     showColorStat();
+    showGrade();
     var visible = profile === 'custom' && advancedProfile;
     document.getElementById('customEditor').style.display = visible ? 'block' : 'none';
     document.getElementById('customProfile').disabled = !visible;
@@ -143,26 +161,29 @@ function display(result) {
     }
     if (result.calibrationProfile && !profileDirty) {
         profile = result.calibrationProfile;
-        geometry = result.customGeometry === 'rectangles' ? 'rectangles' : 'rim';
+        geometry = geometryNames[result.customGeometry] ? result.customGeometry : 'rim';
         showProfile();
         var stored = {
             model: result.customModel || result.tvModel || 'TV-MODEL',
             points: result.customPoints && result.customPoints.length ? result.customPoints : []
         };
-        if (result.customGeometry === 'rectangles') stored.geometry = 'rectangles';
+        if (result.customGeometry === 'rectangles' || result.customGeometry === 'smooth') stored.geometry = result.customGeometry;
         else if (result.customRectangles && result.customRectangles.length) stored.geometry = 'rim';
         if (result.customRectangles && result.customRectangles.length) stored.rectangles = result.customRectangles;
         compensate = !!result.customCompensate;
         colorStat = colorStatNames[result.colorStat] ? result.colorStat : 'mean';
+        grade = gradeNames[result.grade] ? result.grade : 'off';
         stored.compensate = compensate;
         stored.colorStat = colorStat;
+        if (grade !== 'off') stored.grade = grade;
         if (result.customBlack && result.customBlack.length) stored.black = result.customBlack;
         if (result.customWhite && result.customWhite.length) stored.white = result.customWhite;
         document.getElementById('customProfile').value = JSON.stringify(stored, null, 2);
     }
     showCompensate();
     showColorStat();
-    if (result.effectiveCalibration) document.getElementById('profileStatus').textContent = 'TV: ' + (result.tvModel || 'Unknown') + ' · Active profile: ' + profileNames[result.effectiveCalibration] + (result.effectiveCalibration === 'custom' ? ' · ' + geometryNames[result.spatialGeometry === 'rectangles' ? 'rectangles' : 'rim'] : '') + (result.effectiveCalibration === 'average' ? ' · Spatial calibration needed for this model' : '');
+    showGrade();
+    if (result.effectiveCalibration) document.getElementById('profileStatus').textContent = 'TV: ' + (result.tvModel || 'Unknown') + ' · Active profile: ' + profileNames[result.effectiveCalibration] + (result.effectiveCalibration === 'custom' ? ' · ' + (geometryNames[result.spatialGeometry] || geometryNames.rim) : '') + (result.effectiveCalibration === 'average' ? ' · Spatial calibration needed for this model' : '');
 
     if (result.host && !targetDirty) {
         document.getElementById('host').value = result.host;
@@ -432,7 +453,7 @@ document.getElementById('saveProfile').onclick = function() {
             var parsed = JSON.parse(document.getElementById('customProfile').value);
             data.model = parsed.model;
             data.points = parsed.points;
-            data.geometry = parsed.geometry === 'rectangles' ? 'rectangles' : parsed.geometry === 'rim' ? 'rim' : geometry;
+            data.geometry = geometryNames[parsed.geometry] ? parsed.geometry : geometry;
             if (parsed.rectangles && parsed.rectangles.length) data.rectangles = parsed.rectangles;
             if (parsed.black && parsed.white) {
                 data.black = parsed.black;
@@ -440,6 +461,7 @@ document.getElementById('saveProfile').onclick = function() {
             }
             data.compensate = parsed.compensate === true || compensate;
             data.colorStat = colorStatNames[parsed.colorStat] ? parsed.colorStat : colorStat;
+            data.grade = gradeNames[parsed.grade] ? parsed.grade : grade;
         } catch (e) {
             showActionError('Custom profile must be valid JSON.');
             return;
@@ -462,7 +484,7 @@ document.getElementById('editProfile').onclick = function() {
     if (advancedProfile) document.getElementById('customProfileField').focus();
 };
 document.getElementById('geometry').onclick = function() {
-    geometry = geometry === 'rim' ? 'rectangles' : 'rim';
+    geometry = geometryOrder[(geometryOrder.indexOf(geometry) + 1) % geometryOrder.length];
     profileDirty = true;
     var field = document.getElementById('customProfile'),
         stored = null;
@@ -510,6 +532,24 @@ if (colorStatButton) colorStatButton.onclick = function() {
         field.value = JSON.stringify(stored, null, 2);
     }
     showProfile();
+};
+var gradeButton = document.getElementById('grade');
+if (gradeButton) gradeButton.onclick = function() {
+    grade = gradeOrder[(gradeOrder.indexOf(grade) + 1) % gradeOrder.length];
+    profileDirty = true;
+    var field = document.getElementById('customProfile'),
+        stored = null;
+    try {
+        stored = JSON.parse(field.value);
+    } catch (e) {
+        stored = null;
+    }
+    if (stored && typeof stored === 'object') {
+        if (grade === 'off') delete stored.grade;
+        else stored.grade = grade;
+        field.value = JSON.stringify(stored, null, 2);
+    }
+    showGrade();
 };
 /* The remote walks the controls in the order they are drawn, so the list is
  * taken from the document instead of a hand-kept array. A control added to the

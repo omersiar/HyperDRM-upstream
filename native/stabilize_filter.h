@@ -8,19 +8,24 @@
  * Startup: three samples, started from their median, so the first dither state
  * cannot lock the output high or low.
  * Running: a difference of four codes or less is dither. It is taken halfway at
- * once, so it neither flickers nor waits. Anything larger must persist for one
- * more sample before it is believed; that single confirmation is the price of
- * not showing one-frame decoder artefacts. A change larger than 32 codes is real
- * light -- a cut, a flash, a lamp being switched -- and goes out in the same
- * frame.
+ * once, so it neither flickers nor waits. Anything larger is believed on the
+ * first frame when it is brighter and on the second when it is darker: a shot
+ * that brightens must not lag, and a one-frame darker artefact is what the
+ * confirmation is for. A change larger than 32 codes is real light -- a flash,
+ * a lamp being switched -- and goes out in the same frame either way.
+ * A scene cut skips all of it: scene_cut.h detects it from the histograms and
+ * stabilize_snap adopts the new picture whole.
  * Finally a three-level deadband holds the last one or two codes of residual,
  * with a small leak so a real fade still gets through. */
 #include <stdbool.h>
 #include <string.h>
 #define STABILIZE_THRESHOLD 4
-/* One confirmation. Needing two cost a capture period for every mid-sized
- * change and bought nothing the threshold band does not already do. */
-#define STABILIZE_SAMPLES 2
+/* Attack is immediate, release is confirmed. The LEDs must not lag the moment a
+ * shot gets brighter -- that is the change a viewer notices -- while a one-frame
+ * darker artefact is exactly what the confirmation exists to reject. Two
+ * samples of release is 50 ms at 40 fps: eased, not sluggish. */
+#define STABILIZE_ATTACK 1
+#define STABILIZE_RELEASE 2
 #define STABILIZE_SEED 3
 #define STABILIZE_DEADBAND 3
 /* Small steps creep towards the measured value instead of jumping, which keeps
@@ -43,6 +48,18 @@ typedef struct {
 } StabilizeFilter;
 static inline void stabilize_reset(StabilizeFilter *filter) {
     memset(filter, 0, sizeof(*filter));
+}
+/* Scene cut: adopt the new picture whole. There is nothing to confirm, because
+ * the picture it would be confirmed against is gone, and the seed window would
+ * otherwise spend two frames on the median of the old shot and the new one. */
+static inline void stabilize_snap(StabilizeFilter *filter, const unsigned char input[16][3]) {
+    memcpy(filter->output, input, sizeof(filter->output));
+    memcpy(filter->display, input, sizeof(filter->display));
+    memset(filter->count, 0, sizeof(filter->count));
+    memset(filter->stuck, 0, sizeof(filter->stuck));
+    memset(filter->direction, 0, sizeof(filter->direction));
+    filter->seed_count = STABILIZE_SEED;
+    filter->ready = true;
 }
 static inline unsigned char stabilize_median(const unsigned char *values, unsigned count) {
     unsigned char sorted[STABILIZE_SEED];
@@ -99,7 +116,11 @@ static inline void stabilize_push(StabilizeFilter *filter, const unsigned char i
                 if (!same_direction) {
                     filter->candidate[r][c] = (unsigned char)value;
                     filter->count[r][c] = 1;
-                } else if (++filter->count[r][c] >= STABILIZE_SAMPLES) {
+                } else if (filter->count[r][c] < 255) {
+                    filter->count[r][c]++;
+                }
+                unsigned needed = value > current ? STABILIZE_ATTACK : STABILIZE_RELEASE;
+                if (filter->count[r][c] >= needed) {
                     filter->output[r][c] = (unsigned char)value;
                     filter->count[r][c] = 0;
                 }

@@ -1,6 +1,6 @@
 {
   "id": "org.webosbrew.histogramhyperion",
-  "version": "0.15.4",
+  "version": "0.15.11",
   "vendor": "Local development",
   "app": "org.webosbrew.histogramhyperion",
   "services": [

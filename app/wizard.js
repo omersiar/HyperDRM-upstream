@@ -131,8 +131,10 @@ function wizardCommit() {
         /* Keep whatever colour statistic the profile already used; the wizard
          * only measures geometry and references, it never chooses a summary.
          * The list is local so this file does not depend on app.js globals. */
-        var stats = ['mean', 'active', 'p50', 'p90', 'peak'];
+        var stats = ['mean', 'vivid', 'active', 'p50', 'p90', 'peak'];
         measured.colorStat = stored && stats.indexOf(stored.colorStat) >= 0 ? stored.colorStat : 'mean';
+        if (stored && (stored.grade === 'gentle' || stored.grade === 'strong'))
+            measured.grade = stored.grade;
         if (blackRgb && whiteRgb) {
             measured.black = blackRgb.map(function(rgb) {
                 return rgb.map(function(value) {
@@ -148,10 +150,11 @@ function wizardCommit() {
         if (rectangles && rectangles.length) {
             measured.rectangles = rectangles;
             /* Keep a deliberate rim choice, but use the measured rectangles when
-             * the user had selected rectangles or had no explicit geometry. */
-            measured.geometry = stored && stored.geometry === 'rim' ? 'rim' : 'rectangles';
-        } else if (stored && stored.geometry === 'rectangles') {
-            measured.geometry = 'rectangles';
+             * the user had selected rectangles or had no explicit geometry.
+             * Reconstructed is built on the same rectangles, so it survives too. */
+            measured.geometry = stored && stored.geometry === 'rim' ? 'rim' : stored && stored.geometry === 'smooth' ? 'smooth' : 'rectangles';
+        } else if (stored && (stored.geometry === 'rectangles' || stored.geometry === 'smooth')) {
+            measured.geometry = stored.geometry;
             if (stored.model === measured.model && stored.rectangles && stored.rectangles.length) measured.rectangles = stored.rectangles;
         }
         profile = 'custom';
@@ -172,7 +175,8 @@ function wizardCommit() {
             black: measured.black,
             white: measured.white,
             compensate: measured.compensate === true,
-            colorStat: measured.colorStat
+            colorStat: measured.colorStat,
+            grade: measured.grade
         });
     } catch (e) {
         wizardFinish(e.message);

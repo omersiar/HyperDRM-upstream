@@ -46,15 +46,16 @@ static bool status(void *h, void *m, void *ctx) {
     used += snprintf(json + used, sizeof(json) - used, "],\"customRectangleCount\":%u,\"spatialRectangleCount\":%u,"
                                                              "\"customGeometry\":\"%s\","
                      "\"spatialGeometry\":\"%s\",\"customCompensate\":%s,"
-                     "\"colorStat\":\"%s\",\"customHasReference\":%s,"
+                     "\"colorStat\":\"%s\",\"grade\":\"%s\",\"customHasReference\":%s,"
                      "\"layoutUpdates\":%u,"
                      "\"lastLayoutCheckAgeMs\":%lld,\"layoutError\":\"%s\","
                      "\"piccapFallbacks\":%u,\"piccapCooldownMs\":%llu,",
                      calibration.rect_count, spatial_rectangles,
-                     calibration.rect_geometry ? "rectangles" : "rim",
-                     calibration_rectangles() ? "rectangles" : "rim",
+                     calibration_geometry_name(),
+                     calibration_spatial_geometry_name(),
                      calibration.compensate ? "true" : "false",
                      calibration_stat_key(calibration.color_stat),
+                     color_grade_key(calibration.grade),
                      calibration.has_reference ? "true" : "false", layout_updates,
                      last_layout_check ? (long long)(now - last_layout_check) : -1, layout_error,
                      piccap_fallbacks,
@@ -77,7 +78,9 @@ static bool status(void *h, void *m, void *ctx) {
     used += snprintf(json + used, sizeof(json) - used,
                      "\"calibrationDraft\":{\"model\":\"%s\",\"geometry\":\"%s\",\"points\":[",
                      calibration_ctx.draft.model,
-                     calibration_ctx.draft.rect_geometry ? "rectangles" : "rim");
+                     calibration_ctx.draft.smooth_render
+                         ? "smooth"
+                         : calibration_ctx.draft.rect_geometry ? "rectangles" : "rim");
     for (unsigned i = 0; i < calibration_ctx.draft.count; i++)
         used += snprintf(json + used, sizeof(json) - used, "%s{\"position\":%.12g,\"region\":%u}",
                          i ? "," : "", calibration_ctx.draft.points[i].position,
@@ -180,6 +183,7 @@ static bool status(void *h, void *m, void *ctx) {
               * socket write. A feed that feels late shows up here first. */
              "\"captureWanted\":%s,\"recoveryAttempts\":%u,\"vtGetMs\":%u,\"renderMs\":%u,"
              "\"sendMs\":%u,\"tickMs\":%u,\"sampleGapMs\":%u,\"outputGapMs\":%u,"
+             "\"sceneCuts\":%u,\"sceneCutDistance\":%u,"
              "\"sampleFps\":%u,\"outputFps\":%u,\"receiverStage\":\"%s\",\"outputRegions\":[",
              capture_ctx.preset, receiver_layout.interpolation ? "true" : "false",
              boot_enabled() ? "true" : "false", retries.due ? "true" : "false",
@@ -197,6 +201,7 @@ static bool status(void *h, void *m, void *ctx) {
              capture_ctx.vt_get_us / 1000, capture_ctx.plane_us / 1000,
              capture_ctx.send_us / 1000, capture_ctx.tick_us / 1000, capture_ctx.sample_gap_ms,
              capture_ctx.output_gap_ms,
+             capture_ctx.scene_cuts, capture_ctx.scene_cut_distance,
              capture_ctx.sample_gap_ms ? 1000 / capture_ctx.sample_gap_ms : 0,
              capture_ctx.output_gap_ms ? 1000 / capture_ctx.output_gap_ms : 0,
              target_flatbuffer(&target)

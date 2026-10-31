@@ -2,6 +2,7 @@
 #define HYPERDRM_CALIBRATION_H
 #include <math.h>
 #include <stdlib.h>
+#include "color_grade.h"
 #include "playback.h"
 #include "atomic_file.h"
 #define CALIBRATION_PREF                                                                           \
@@ -24,17 +25,20 @@ typedef struct {
 /* How the 256 bins of a region/channel become one value. The mean is the
  * default; a percentile keeps the bright end of a region that mixes light and
  * dark, and active averages only the pixels above the black reference so a small
- * bright object is not diluted by a large dark background. */
+ * bright object is not diluted by a large dark background. Vivid is the mean of
+ * an S-curved distribution, which separates channels without inventing them. */
 #define CAL_STAT_MEAN 0
 #define CAL_STAT_P50 1
 #define CAL_STAT_P90 2
 #define CAL_STAT_PEAK 3
 #define CAL_STAT_ACTIVE 4
+#define CAL_STAT_VIVID 5
 static inline const char *calibration_stat_key(unsigned stat) {
     return stat == CAL_STAT_P50      ? "p50"
            : stat == CAL_STAT_P90    ? "p90"
            : stat == CAL_STAT_PEAK   ? "peak"
            : stat == CAL_STAT_ACTIVE ? "active"
+           : stat == CAL_STAT_VIVID  ? "vivid"
                                      : "mean";
 }
 typedef struct {
@@ -45,12 +49,19 @@ typedef struct {
     unsigned rect_count;
     RegionRect rects[16];
     bool rect_geometry;
+    /* Opt-in alternative to painting the winning region per point: solve the
+     * rectangles for a coarse colour grid and interpolate it. Only meaningful
+     * with measured rectangles; see reconstruct.h. */
+    bool smooth_render;
     /* Full-black and full-white reference means, measured per region/channel.
      * Optional: only used when the user enables colour-cast compensation. */
     bool has_reference;
     bool compensate;
     /* How the rendered feed summarises each region; see CAL_STAT_*. */
     unsigned color_stat;
+    /* Brightness/colour grade applied to the finished region colours; see
+     * COLOR_GRADE_* in color_grade.h. Off by default. */
+    unsigned grade;
     unsigned char black[16][3];
     unsigned char white[16][3];
 } Calibration;
@@ -96,6 +107,24 @@ static inline CalibrationKind calibration_effective(void) {
 static inline bool calibration_rectangles(void) {
     return calibration.rect_geometry && calibration_effective() == CAL_CUSTOM &&
            calibration.rect_count > 0;
+}
+/* The reconstructed renderer needs the same measured rectangles as the region
+ * renderer; it replaces only how the plane is filled. */
+static inline bool calibration_smooth(void) {
+    return calibration.smooth_render && calibration_rectangles();
+}
+/* Stored preference, and what is actually painted once the rectangles have
+ * been checked against the active profile. Both are reported, because a
+ * profile can ask for rectangles the panel does not have. */
+static inline const char *calibration_geometry_name(void) {
+    if (calibration.smooth_render)
+        return "smooth";
+    return calibration.rect_geometry ? "rectangles" : "rim";
+}
+static inline const char *calibration_spatial_geometry_name(void) {
+    if (calibration_smooth())
+        return "smooth";
+    return calibration_rectangles() ? "rectangles" : "rim";
 }
 /* Only measured rectangles are painted. The rectangle geometry has no derived
  * fallback: a rim anchor does not describe how far a region reaches inwards. */
@@ -214,12 +243,16 @@ static inline bool calibration_parse(PlaybackJson *j, const char *text, Calibrat
     }
     if (j->type(root) == 4 && j->get(root, "geometry", &geometry)) {
         valid = valid && j->type(geometry) == 6;
-        if (valid && !strcmp(j->string(geometry), "rectangles"))
+        if (valid && !strcmp(j->string(geometry), "smooth")) {
             next.rect_geometry = true;
-        else if (valid && !strcmp(j->string(geometry), "rim"))
+            next.smooth_render = true;
+        } else if (valid && !strcmp(j->string(geometry), "rectangles")) {
+            next.rect_geometry = true;
+        } else if (valid && !strcmp(j->string(geometry), "rim")) {
             next.rect_geometry = false;
-        else
+        } else {
             valid = false;
+        }
     }
     void *black = NULL, *white = NULL, *compensate = NULL;
     bool black_present = j->type(root) == 4 && j->get(root, "black", &black);
@@ -262,9 +295,16 @@ static inline bool calibration_parse(PlaybackJson *j, const char *text, Calibrat
     } else if (playback_is(j, root, "colorStat", "active")) {
         next.color_stat = CAL_STAT_ACTIVE;
         stat_set = true;
+    } else if (playback_is(j, root, "colorStat", "vivid")) {
+        next.color_stat = CAL_STAT_VIVID;
+        stat_set = true;
     } else if (playback_is(j, root, "colorStat", "mean")) {
         next.color_stat = CAL_STAT_MEAN;
         stat_set = true;
+    }
+    void *grade = NULL;
+    if (j->type(root) == 4 && j->get(root, "grade", &grade)) {
+        valid = valid && j->type(grade) == 6 && color_grade_parse(j->string(grade), &next.grade);
     }
     /* A profile saved before the statistic existed carried ignore-black as its
      * own flag; it selects the same behaviour. */
@@ -312,8 +352,10 @@ static inline bool calibration_save(const char *path, const Calibration *value) 
         used += snprintf(data + used, sizeof(data) - used, "]");
     }
     if (value->rect_count || value->rect_geometry) {
-        used += snprintf(data + used, sizeof(data) - used, ",\"geometry\":\"%s\"",
-                         value->rect_geometry ? "rectangles" : "rim");
+        const char *geometry = value->smooth_render && value->rect_count
+                                   ? "smooth"
+                                   : value->rect_geometry ? "rectangles" : "rim";
+        used += snprintf(data + used, sizeof(data) - used, ",\"geometry\":\"%s\"", geometry);
     }
     if (value->rect_count) {
         used += snprintf(data + used, sizeof(data) - used, ",\"rectangles\":[");
@@ -342,6 +384,9 @@ static inline bool calibration_save(const char *path, const Calibration *value) 
     if (value->color_stat)
         used += snprintf(data + used, sizeof(data) - used, ",\"colorStat\":\"%s\"",
                          calibration_stat_key(value->color_stat));
+    if (value->grade)
+        used += snprintf(data + used, sizeof(data) - used, ",\"grade\":\"%s\"",
+                         color_grade_key(value->grade));
     used += snprintf(data + used, sizeof(data) - used, "}\n");
     return used > 0 && (size_t)used < sizeof(data) &&
            atomic_replace(path, data, (size_t)used) != SAVE_UNCHANGED;

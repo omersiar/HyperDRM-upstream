@@ -21,8 +21,14 @@
  *
  * Rim profiles have no measured rectangles, so there the feed keeps the
  * documented blend along the perimeter. The exact-copy rule applies wherever we
- * actually know where a window is. */
+ * actually know where a window is.
+ *
+ * A custom profile may instead ask for the reconstructed renderer (geometry
+ * "smooth", see reconstruct.h). Then the same measured windows are used to
+ * solve for a smooth field and that field is interpolated here. It is opt-in
+ * and off by default, because it deliberately sends interpolated colours. */
 #include "layout.h"
+#include "reconstruct.h"
 #define EDGE_WIDTH 160
 #define EDGE_HEIGHT 90
 #define EDGE_PIXELS (EDGE_WIDTH * EDGE_HEIGHT)
@@ -97,6 +103,8 @@ static void edge_plane_slow(const unsigned char regions[16][3], unsigned char *o
 }
 static void edge_plane(const unsigned char regions[16][3], unsigned char *out, unsigned width,
                        unsigned height) {
+    if (calibration_smooth() && reconstruct_plane(regions, out, width, height))
+        return;
     const EdgeCell *cells = edge_cells(width, height);
     if (!cells) {
         edge_plane_slow(regions, out, width, height);

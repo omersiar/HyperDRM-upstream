@@ -3,6 +3,7 @@
 #include <signal.h>
 #include "histogram.h"
 #include "continuity.h"
+#include "scene_cut.h"
 #include "stabilize_filter.h"
 typedef struct {
     void *handle;
@@ -25,6 +26,8 @@ typedef struct {
     Histogram last_hist[16];
     bool hist_ready;
     StabilizeFilter output_filter;
+    SceneCut scene_cut;
+    unsigned scene_cuts, scene_cut_distance;
     unsigned black_percent[16], preset, letterbox_mode, settling;
     int pending_letterbox;
     uint64_t candidate_since, next_border_probe, sample_at;

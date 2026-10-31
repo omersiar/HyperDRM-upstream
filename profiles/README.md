@@ -39,7 +39,7 @@ smoothing remain receiver settings. Runtime selection invalidates the generated
 HyperHDR geometry and refreshes the Hyperion LED mapping without capture restart.
 ## Spatial geometry
 
-Two renderers turn the 16 samples into the receiver's image. They are a saved
+Three renderers turn the 16 samples into the receiver's image. They are a saved
 per-profile choice, not a fixed behaviour, because the best one differs between
 TVs:
 
@@ -47,15 +47,49 @@ TVs:
   screen edge. Simple, but a single sample owns a wide cone, so one dark or
   dropped region paints a large area.
 - **Region rectangles** paints blocks instead of cones.
+- **Reconstructed** uses the same rectangles to solve for one smooth picture:
+  `min |A x - m|^2 + 0.01 |L x|^2` over a 32x18 grid, where `A` is how much of
+  each measured rectangle falls in each grid cell. Boundaries between windows
+  stop showing as seams. It is a regularised fit, so it softens detail that the
+  sixteen averages cannot distinguish -- try it on the receiver preview and on
+  the wall before keeping it. Regions 14 and 15 are left out of the fit: they
+  are the two panel-anchored probes, narrow enough that their own means pull
+  their neighbourhoods towards themselves. The bar still comes from region 14.
 
-The app offers this as **Geometry: Perimeter / Region rectangles** in the TV
-calibration panel (custom profile only). Recalibrating replaces the point list
-but keeps the selected geometry; use the same button to compare both models on
-the receiver's LED preview and keep the one that matches the LEDs.
+The app offers this as **Geometry: Perimeter / Region rectangles /
+Reconstructed** in the TV calibration panel (custom profile only).
+Recalibrating replaces the point list but keeps the selected geometry; use the
+same button to compare the models on the receiver's LED preview and keep the
+one that matches the LEDs.
 
-Region rectangles are painted only from actual measurements. Selecting the mode
-without measured extents falls back to the perimeter model: blocks invented
-from rim anchors produced a Voronoi mosaic that did not describe the picture.
+Region rectangles and the reconstruction are painted only from actual
+measurements. Selecting either without measured extents falls back to the
+perimeter model: blocks invented from rim anchors produced a Voronoi mosaic
+that did not describe the picture.
+
+### Reconstruction table
+
+`native/reconstruct_table.h` is generated, not hand-written. It holds the 576x16
+fixed-point map from the sixteen measurements to the grid, which depends only on
+the rectangles, so it cannot be computed on the TV. Regenerate it after changing
+the grid, the smoothing weight or the measured geometry:
+
+```sh
+python3 tools/histogram_reconstruct.py --emit native/reconstruct_table.h
+```
+
+The tool also evaluates the alternatives it was chosen from (nearest window,
+minimum norm, tensor basis, other weights) against synthetic scenes: run it with
+no arguments and read the table it prints.
+
+### Brightness and colour grade
+
+`"grade"` is an optional second pass over the finished colours, in OKLab where
+lightness and chroma are separate. `gentle` and `strong` lift muted colours most,
+leave saturated colours and whites alone, hold the strip below full panel
+brightness and keep a small floor so a black scene is a glow rather than a hole.
+Chroma that does not fit is reduced along constant hue rather than clipped, which
+would shift the colour. Omitted means `off`.
 
 ### Measured rectangles
 
@@ -71,6 +105,7 @@ region. The profile stores them next to the rim anchors:
   "geometry": "rectangles",
   "compensate": false,
   "colorStat": "mean",
+  "grade": "gentle",
   "rectangles": [
     {"region": 15, "x0": 0.0, "y0": 0.41, "x1": 0.19, "y1": 0.79},
     {"region": 4, "x0": 0.19, "y0": 0.3, "x1": 0.38, "y1": 0.82}

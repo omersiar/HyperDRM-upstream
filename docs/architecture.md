@@ -14,6 +14,10 @@ Formatting must preserve include order (`SortIncludes: Never`).
 | capture_loop.h | Scheduler, histogram acquisition, missing-data recovery and output |
 | layout.h | Window geometry: rectangle selection, letterbox projection, rim interpolation |
 | edge_feed.h | Builds the output plane by copying measurements, never blending them |
+| scene_cut.h | Detects a shot change from the histogram distance, before the filter smears it |
+| color_grade.h | Brightness and colour in OKLab, with a gamut map, after the measurement |
+| reconstruct.h | Opt-in smooth renderer: solves the measurements for a coarse grid and interpolates it |
+| reconstruct_table.h | Generated 576x16 fixed-point map from the sixteen measurements to that grid |
 | frame_output.h | Transport selection between the JSON and FlatBuffer output paths |
 | receiver_output.h | Main asynchronous connection, transaction matching and frame coalescing |
 | flatbuffer.h | Back-to-front FlatBuffers writer for HyperHDR's Request schema |
@@ -118,6 +122,23 @@ resolves the owning measurement once per profile and bar into a cell table, so t
 per-frame work is a table walk: render fell to under a millisecond and the feed went
 from 12 Hz to 30 Hz at a 25 ms capture interval. `outputRegions` reports the colours
 a frame actually carried, which is what makes receiver-visible latency measurable.
+
+## Scene cuts and the temporal filter
+
+`stabilize_filter.h` holds dither, but it must not hold a real change. Its
+asymmetry follows what a viewer notices: an increase above the dither band is
+accepted on the first sample, a decrease needs a second, and a step beyond
+`STABILIZE_JUMP` is real light and goes out at once either way.
+
+A cut is different in kind, and `scene_cut.h` finds it before the filter sees it.
+The region means cannot see a cut -- two differently arranged shots can share a
+palette -- but the distributions can: `d` is the normalised L1 between this
+frame's 16x3x256 counts and the last, in permille, so 0 is identical and 1000 is
+no shared mass. Above `SCENE_CUT_DISTANCE` the frame is adopted whole
+(`stabilize_snap`), skipping both the confirmation and the startup median, which
+would otherwise spend two frames on a colour neither shot had. `status` reports
+`sceneCuts` and the last `sceneCutDistance`, so the threshold is judged against
+real content rather than guessed.
 
 The source bridge receives CaptureContext explicitly; layout refresh receives
 ReceiverLayoutContext explicitly. Capture data, continuity, recovery counters and

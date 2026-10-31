@@ -2,6 +2,7 @@
 #define LG_HISTOGRAM_H
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include "color_space.h"
 /* LG ABI: region ID followed by three planar channels, 256 uint16 bins
  * per channel. Bin index is the 8-bit intensity (0..255). */
@@ -26,6 +27,57 @@ static inline double histogram_linear_mean(const uint16_t bins[256]) {
 }
 static inline unsigned char histogram_mean(const uint16_t bins[256]) {
     return color_encode(histogram_linear_mean(bins));
+}
+/* Chroma boost that survives averaging.
+ *
+ * Only area means can go through the reconstruction, and a mean of any per-pixel
+ * function is still linear in the histogram. So the boost is applied to the
+ * bins: every bin is pushed away from mid-grey by an S-curve, and the mean of
+ * the pushed values is taken in linear light as usual. Where two channels have
+ * different populations they separate, so orange reads as more orange while a
+ * grey stays grey, and the inverse still sees a genuine mean of a picture.
+ *
+ *   f(b) = b + gain * (b - 128) * (1 - ((b - 128) / 128)^2)
+ *
+ * is fixed at black, mid-grey and white and monotone for gain <= 0.5, so it
+ * cannot reorder a channel or move a neutral. Gain is a per-product taste:
+ * 0.35 is a visible push that leaves already-saturated colours close to where
+ * they were, because their bins sit near the flat ends of the curve. */
+#define HISTOGRAM_VIVID_GAIN 0.35
+static inline unsigned histogram_vivid_bin(unsigned bin) {
+    if (bin > 255)
+        bin = 255;
+    double offset = (double)bin - 128.0;
+    double curved =
+        (double)bin + HISTOGRAM_VIVID_GAIN * offset * (1.0 - (offset / 128.0) * (offset / 128.0));
+    if (curved < 0.0)
+        return 0;
+    if (curved > 255.0)
+        return 255;
+    return (unsigned)(curved + 0.5);
+}
+/* Linear light of every curved bin, built once: the curve is per pixel but the
+ * input is a count per bin, so the work per frame stays one multiply per bin. */
+static inline const double *histogram_vivid_light_table(void) {
+    static double table[256];
+    static bool ready;
+    if (!ready) {
+        const double *light = color_light_table();
+        for (unsigned b = 0; b < 256; b++)
+            table[b] = light[histogram_vivid_bin(b)];
+        ready = true;
+    }
+    return table;
+}
+static inline double histogram_vivid_linear_mean(const uint16_t bins[256]) {
+    const double *light = histogram_vivid_light_table();
+    uint64_t count = 0;
+    double total = 0;
+    for (unsigned b = 0; b < 256; b++) {
+        count += bins[b];
+        total += (double)bins[b] * light[b];
+    }
+    return count ? total / (double)count : 0;
 }
 /* Mean of the pixels above a black threshold. Renormalising the remaining
  * counts removes black-background dilution without changing the channel

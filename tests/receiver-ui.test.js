@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('assert'),fs=require('fs'),vm=require('vm');
-const ids=['reloadService','versionWarning','host','port','piccapPort','captureInterval','receiver','output','token','clearToken','endpoint','handover','autostart','error','status','regions','start','stop','refresh','saveTarget','testConnection','testResult','diagnostics','profile','geometry','compensate','colorStat','customEditor','customProfile','saveProfile','profileStatus','calibrate','validateCalibration','cancelCalibration','editProfile','customProfileField','overviewTab','receiverTab','calibrationTab','calibrationShortcut','hostField','portField','piccapPortField','captureIntervalField','tokenField','grantRoot','rootHint','help-automatic','help-calibration','help-receiver','help-output','help-network','help-profile','help-geometry','help-compensate','help-colour','helpClose'];
+const ids=['reloadService','versionWarning','host','port','piccapPort','captureInterval','receiver','output','token','clearToken','endpoint','handover','autostart','error','status','regions','start','stop','refresh','saveTarget','testConnection','testResult','diagnostics','profile','geometry','compensate','colorStat','grade','customEditor','customProfile','saveProfile','profileStatus','calibrate','validateCalibration','cancelCalibration','editProfile','customProfileField','overviewTab','receiverTab','calibrationTab','calibrationShortcut','hostField','portField','piccapPortField','captureIntervalField','tokenField','grantRoot','rootHint','help-automatic','help-calibration','help-receiver','help-output','help-network','help-profile','help-geometry','help-compensate','help-colour','help-grade','helpClose'];
 const elements={};
 ids.forEach(id=>elements[id]={value:'',textContent:'',disabled:false,checked:false,attributes:{},style:{},addEventListener(){},focus(){},appendChild(){},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k];}});
 const requests=[];
@@ -22,9 +22,9 @@ assert(elements.diagnostics.textContent.includes('Root service'));
 assert(controls.includes(elements.piccapPortField)&&controls.includes(elements.testConnection)&&controls.includes(elements.output));
 const domButtons=[...markup.matchAll(/<button id="([^"]+)"/g)].map(m=>m[1]);
 const domIndex=id=>domButtons.indexOf(id),navIndex=id=>controls.indexOf(elements[id]);
-['profile','saveProfile','editProfile','geometry','compensate','colorStat'].reduce((previous,id)=>{assert(domIndex(previous)<domIndex(id),'markup order '+previous+'<'+id);assert(navIndex(previous)<navIndex(id),'remote order '+previous+'<'+id);return id;});
+['profile','saveProfile','editProfile','geometry','compensate','colorStat','grade'].reduce((previous,id)=>{assert(domIndex(previous)<domIndex(id),'markup order '+previous+'<'+id);assert(navIndex(previous)<navIndex(id),'remote order '+previous+'<'+id);return id;});
 /* Every help button is reached directly after the control it explains. */
-const helpOwner={'help-automatic':'handover','help-calibration':'calibrationShortcut','help-receiver':'receiver','help-output':'output','help-network':'testConnection','help-profile':'profile','help-geometry':'geometry','help-compensate':'compensate','help-colour':'colorStat'};
+const helpOwner={'help-automatic':'handover','help-calibration':'calibrationShortcut','help-receiver':'receiver','help-output':'output','help-network':'testConnection','help-profile':'profile','help-geometry':'geometry','help-compensate':'compensate','help-colour':'colorStat','help-grade':'grade'};
 Object.keys(helpOwner).forEach(id=>{assert(controls.includes(elements[id]),'help button '+id+' is unreachable');assert.equal(navIndex(id),navIndex(helpOwner[id])+1,'help order: '+id+' must follow '+helpOwner[id]);});
 context.targetDirty=true;elements.testConnection.onclick();assert(elements.error.textContent.includes('Save receiver'));
 elements.piccapPort.value='0';elements.saveTarget.onclick();assert(elements.error.textContent.includes('FlatBuffer port'));
@@ -40,7 +40,7 @@ assert(!('rectangles' in requests.filter(r=>r.uri.endsWith('/calibration')).pop(
 context.profile='custom';
 elements.geometry.onclick();assert(elements.geometry.textContent==='Geometry: Region rectangles');assert(JSON.parse(elements.customProfile.value).geometry==='rectangles');
 elements.compensate.onclick();assert(elements.compensate.textContent.includes('On'));assert(JSON.parse(elements.customProfile.value).compensate===true);
-elements.colorStat.onclick();assert(elements.colorStat.textContent==='Colour: Active');assert(JSON.parse(elements.customProfile.value).colorStat==='active');
+elements.colorStat.onclick();assert(elements.colorStat.textContent==='Colour: Vivid');assert(JSON.parse(elements.customProfile.value).colorStat==='vivid');
 elements.customProfile.value=JSON.stringify({model:'OTHER-TV',points:[{position:0,region:1},{position:2,region:5}],geometry:'rectangles',rectangles:[{region:15,x0:0,y0:0.4,x1:0.19,y1:0.8}]});elements.saveProfile.onclick();
 const withRectangles=requests.filter(r=>r.uri.endsWith('/calibration')).pop().data;assert.strictEqual(withRectangles.geometry,'rectangles');assert.strictEqual(withRectangles.rectangles.length,1);assert.strictEqual(withRectangles.rectangles[0].region,15);
 status.calibrationProfile='custom';status.customRectangles=[{region:15,x0:0,y0:0.4,x1:0.19,y1:0.8}];status.customGeometry='rectangles';status.spatialGeometry='rectangles';status.customCompensate=true;status.colorStat='active';status.customBlack=Array.from({length:16},()=>[0,0,0]);status.customWhite=Array.from({length:16},()=>[255,255,255]);context.display(status);

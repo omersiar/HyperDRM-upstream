@@ -231,6 +231,8 @@ static int tick(void *unused) {
                 light = histogram_linear_percentile(ordered[i].bins[c], 900);
             else if (!CALIBRATION_ACTIVE && calibration.color_stat == CAL_STAT_PEAK)
                 light = histogram_linear_percentile(ordered[i].bins[c], 1000);
+            else if (!CALIBRATION_ACTIVE && calibration.color_stat == CAL_STAT_VIVID)
+                light = histogram_vivid_linear_mean(ordered[i].bins[c]);
             else
                 light = histogram_linear_mean(ordered[i].bins[c]);
             /* Calibration always samples the raw panel: references must not be
@@ -283,12 +285,28 @@ static int tick(void *unused) {
     for (int c = 0; c < 3; c++)
         capture_ctx.sent_rgb[c] = (unsigned char)(aggregate[c] / 16);
     dark_color_filter(capture_ctx.sent_rgb);
+    /* The single-colour output is graded too, or a receiver in that mode would
+     * show a different picture from the strip. */
+    ColorGrade aggregate_grade = color_grade_preset(calibration.grade);
+    color_grade_apply(&aggregate_grade, capture_ctx.sent_rgb);
     unsigned char mapped_rgb[16][3], stable_rgb[16][3];
     unsigned char render_rgb[16][3];
+    /* A cut is the frame the picture became a different picture, so it is the
+     * one change the filter must not ease into. */
+    bool cut = scene_cut_frame(&capture_ctx.scene_cut, ordered, &capture_ctx.scene_cut_distance);
+    if (cut) {
+        capture_ctx.scene_cuts++;
+        stabilize_snap(&capture_ctx.output_filter, capture_ctx.rgb);
+    }
     stabilize_push(&capture_ctx.output_filter, capture_ctx.rgb, render_rgb);
     calibration_colors(render_rgb, mapped_rgb);
-    for (unsigned i = 0; i < 16; i++)
+    /* Brightness and colour are decided after the measurement and after the
+     * temporal filter, so nothing downstream has to know about them. */
+    ColorGrade grade = color_grade_preset(calibration.grade);
+    for (unsigned i = 0; i < 16; i++) {
         dark_color_filter(mapped_rgb[i]);
+        color_grade_apply(&grade, mapped_rgb[i]);
+    }
     continuity_frame(&capture_ctx.continuity, true, mapped_rgb, now, stable_rgb);
     memcpy(capture_ctx.rendered, stable_rgb, sizeof(capture_ctx.rendered));
     receiver_layout.interpolation = receiver_layout.count && calibration_effective() != CAL_AVERAGE;
