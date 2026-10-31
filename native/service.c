@@ -18,6 +18,12 @@
 #include <stdarg.h>
 #include <time.h>
 #include "version.h"
+/* The capture tick is scheduled by a GLib timer, and GLib only runs it when the
+ * main loop wakes. Waking every 10 ms quantised a 25 ms interval to 30 samples
+ * per second; the loop is nearly idle when it wakes, so it wakes every 2 ms
+ * instead and the sample gate keeps the configured rate. */
+#define MAIN_LOOP_TICK_MS 5
+#define MAIN_LOOP_SLEEP_US 2000
 #include "histogram.h"
 #include "blackbars.h"
 #include "interpolation.h"
@@ -172,6 +178,12 @@ static ReceiverRuntime receiver_runtime = {.output = {.fd = -1}, .flatbuffer = {
 static void layout_refresh_reset(uint64_t due);
 static void receiver_stop(uint64_t now, bool clear);
 static void receiver_close(void);
+/* Non-zero while a held frame keeps the receiver lit for another capture
+ * service. Disconnecting clears the priority, so the socket stays open until
+ * the hold has almost expired. */
+static uint64_t output_hold_until;
+#define HANDOVER_HOLD_MS 4000
+static void release_capture_hold(uint64_t now);
 static void release_capture(bool clear_output) {
     layout_refresh_reset(milliseconds() + 5000);
     free(receiver_layout.blends);
@@ -192,8 +204,7 @@ static void release_capture(bool clear_output) {
 }
 static void stop_capture(void) {
     release_capture(true);
-}
-static bool respond(void *h, void *m, const char *s) {
+}static bool respond(void *h, void *m, const char *s) {
     if (!h || !m)
         return true;
     LSError e;
@@ -208,6 +219,34 @@ static bool respond(void *h, void *m, const char *s) {
 #include "receiver_stream.h"
 #include "source_bridge.h"
 #include "frame_output.h"
+/* Give the capture to another service without dropping the picture. The last
+ * measured colours are re-sent with a longer duration, and the connection is
+ * kept open until that duration is almost over: a disconnect clears the
+ * priority, and the other service needs time to deliver its first frame. */
+static void release_capture_hold(uint64_t now) {
+    if (capture_ctx.color_valid) {
+        OutputFrame frame = frame_build(capture_ctx.rgb, receiver_layout.blends,
+                                        receiver_layout.count, HANDOVER_HOLD_MS);
+        if (frame_send(&frame, HANDOVER_HOLD_MS, now))
+            output_hold_until = now + HANDOVER_HOLD_MS;
+        frame_release(&frame);
+    }
+    if (capture_ctx.handle) {
+        vt_finish(capture_ctx.handle);
+        capture_ctx.handle = NULL;
+    }
+    capture_ctx.color_valid = false;
+    memset(capture_ctx.rgb, 0, sizeof(capture_ctx.rgb));
+    memset(capture_ctx.sent_rgb, 0, sizeof(capture_ctx.sent_rgb));
+    stabilize_reset(&capture_ctx.output_filter);
+    capture_ctx.sample_at = 0;
+    free(receiver_layout.blends);
+    receiver_layout.blends = NULL;
+    receiver_layout.count = 0;
+    receiver_layout.interpolation = false;
+    receiver_runtime.starting = false;
+    receiver_runtime.clear_pending = false;
+}
 #include "service_api.h"
 #include "service_histograms.h"
 #include "service_presets.h"
@@ -287,24 +326,32 @@ int main(void) {
     capture_ctx.wanted = boot_enabled() && geteuid() == 0;
     if (!boot_enabled())
         retry_pause(&retries);
-    timer(25, tick, NULL);
+    /* A 10 ms sleep quantises every timer to it: a 25 ms capture interval ran at
+     * 30 samples/s, and that phase error is pure latency. The loop has almost
+     * nothing to do when it wakes, so it may as well wake often. */
+    timer(MAIN_LOOP_TICK_MS, tick, NULL);
     while (!quitting) {
         iterate(NULL, 0);
-        usleep(10000);
+        usleep(MAIN_LOOP_SLEEP_US);
     }
     stream_close(milliseconds());
     test_close();
     stop_capture();
     receiver_close();
     fb_out_release(&receiver_runtime.flatbuffer);
-    if (piccap_owned) {
-        handover_enabled = false;
-        retry_pause(&retries);
-        uint64_t deadline = milliseconds() + 4000;
-        while (piccap_owned && milliseconds() < deadline) {
-            handover_tick();
-            iterate(NULL, 0);
-            usleep(10000);
+    if (piccap_restore) {
+        /* PicCap was running before a takeover. Put it back before quitting so
+         * this service never leaves the TV without a capture. */
+        piccap_target = target;
+        piccap_restore = false;
+        capture_source = SOURCE_PICCAP_STARTING;
+        if (piccap_request(3)) {
+            uint64_t deadline = milliseconds() + 4000;
+            while (capture_source == SOURCE_PICCAP_STARTING && milliseconds() < deadline) {
+                handover_tick(false, 0);
+                iterate(NULL, 0);
+                usleep(10000);
+            }
         }
     }
     unreg(handle, &e);

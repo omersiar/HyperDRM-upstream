@@ -1,26 +1,34 @@
 #ifndef HYPERDRM_STABILIZE_FILTER_H
 #define HYPERDRM_STABILIZE_FILTER_H
-/* LG's region means alternate between two states on a static picture. The
- * filter must remove that without adding hundreds of milliseconds of lag.
+/* LG's region means wobble by a few codes from one frame to the next on a still
+ * picture. The LEDs must not flicker, but they must not lag the picture either:
+ * every sample this filter holds back is one capture period of delay (33 ms at
+ * 30 fps), and that is exactly what a receiver latency measurement reports.
  *
- * Startup: collect three samples and start from their median, so the first
- * dither state cannot lock the output high or low.
- * Running: a three-sample median removes short pulses, then small drifts are
- * tracked and a large jump must persist for three samples unless it is far
- * larger than the dither, in which case it is taken at once. A real scene
- * change arrives in about 50 ms at 25 ms capture. A final three-level deadband
- * holds the remaining one- or two-level residual; a slow leak lets real fades
- * through. */
+ * Startup: three samples, started from their median, so the first dither state
+ * cannot lock the output high or low.
+ * Running: a difference of four codes or less is dither. It is taken halfway at
+ * once, so it neither flickers nor waits. Anything larger must persist for one
+ * more sample before it is believed; that single confirmation is the price of
+ * not showing one-frame decoder artefacts. A change larger than 32 codes is real
+ * light -- a cut, a flash, a lamp being switched -- and goes out in the same
+ * frame.
+ * Finally a three-level deadband holds the last one or two codes of residual,
+ * with a small leak so a real fade still gets through. */
 #include <stdbool.h>
 #include <string.h>
 #define STABILIZE_THRESHOLD 4
-#define STABILIZE_SAMPLES 3
+/* One confirmation. Needing two cost a capture period for every mid-sized
+ * change and bought nothing the threshold band does not already do. */
+#define STABILIZE_SAMPLES 2
 #define STABILIZE_SEED 3
-#define STABILIZE_HISTORY 3
 #define STABILIZE_DEADBAND 3
-#define STABILIZE_LEAK 12
-/* A scene change is orders of magnitude larger than the one-code dither this
- * filter removes, so it needs none of the confirm window. */
+/* Small steps creep towards the measured value instead of jumping, which keeps
+ * one-code wobble off the LEDs. Six samples still hides it and halves the fade
+ * lag the old twelve produced. */
+#define STABILIZE_LEAK 6
+/* A cut or a lamp being switched is orders of magnitude larger than dither, so
+ * it is taken from the raw sample on the first frame. */
 #define STABILIZE_JUMP 32
 typedef struct {
     unsigned char output[16][3];
@@ -30,9 +38,7 @@ typedef struct {
     unsigned char stuck[16][3];
     unsigned char direction[16][3];
     unsigned char seed[STABILIZE_SEED][16][3];
-    unsigned char history[STABILIZE_HISTORY][16][3];
     unsigned seed_count;
-    unsigned history_count;
     bool ready;
 } StabilizeFilter;
 static inline void stabilize_reset(StabilizeFilter *filter) {
@@ -63,44 +69,33 @@ static inline void stabilize_push(StabilizeFilter *filter, const unsigned char i
                     values[i] = filter->seed[i][r][c];
                 filter->output[r][c] = stabilize_median(values, filter->seed_count);
             }
-        if (filter->seed_count == STABILIZE_SEED) {
-            memcpy(filter->history, filter->seed, sizeof(filter->history));
-            filter->history_count = STABILIZE_HISTORY;
+        if (filter->seed_count == STABILIZE_SEED)
             filter->ready = true;
-        }
         memcpy(filter->display, filter->output, sizeof(filter->display));
         memcpy(output, filter->display, sizeof(filter->display));
         return;
     }
-    memcpy(filter->history[filter->history_count % STABILIZE_HISTORY], input,
-           sizeof(filter->history[0]));
-    filter->history_count++;
     for (unsigned r = 0; r < 16; r++)
         for (unsigned c = 0; c < 3; c++) {
-            unsigned char values[STABILIZE_HISTORY];
-            for (unsigned i = 0; i < STABILIZE_HISTORY; i++)
-                values[i] = filter->history[i][r][c];
             int current = filter->output[r][c];
-            int value = stabilize_median(values, STABILIZE_HISTORY);
+            int value = input[r][c];
             int difference = value - current;
             if (difference >= STABILIZE_JUMP || difference <= -STABILIZE_JUMP) {
-                /* A cut or a flash, not dither: take it without waiting for the
-                 * confirm window. The median still has to move first, so this
-                 * lands on the second sample instead of the fourth. */
+                /* Real light, not dither: this frame, no confirmation. */
                 filter->output[r][c] = (unsigned char)value;
-                filter->candidate[r][c] = (unsigned char)value;
                 filter->count[r][c] = 0;
             } else if (difference >= -STABILIZE_THRESHOLD &&
                        difference <= STABILIZE_THRESHOLD) {
+                /* Dither: follow it halfway so it never flickers, and never
+                 * make it wait. */
                 if (difference)
                     filter->output[r][c] =
                         (unsigned char)(current + (difference > 0 ? (difference + 1) / 2
                                                                   : (difference - 1) / 2));
                 filter->count[r][c] = 0;
             } else {
-                int candidate = filter->candidate[r][c];
-                bool same_direction =
-                    filter->count[r][c] && ((value > current) == (candidate > current));
+                bool same_direction = filter->count[r][c] &&
+                                      ((value > current) == (filter->candidate[r][c] > current));
                 if (!same_direction) {
                     filter->candidate[r][c] = (unsigned char)value;
                     filter->count[r][c] = 1;

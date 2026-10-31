@@ -13,13 +13,14 @@ Ambient Light for webOS, Hyperion and HyperHDR. An own webOS app and native ARM 
 - Bounded last-color hold on empty/failed histogram reads, real black detection and 500 ms source transitions using a raw receiver LED subscription.
 - Guided full-screen video calibration for additional TV models: 32 perimeter patches measure the rim anchors, nine vertical and nine horizontal white/black splits measure the 16 region rectangles, black/white phases record per-region colour references, and a four-color video validates the saved profile before it is used.
 - Optional per-region colour-cast compensation from the measured full-black and full-white references, off by default. It neutralises a Warm picture mode or Eye Comfort/Blue Light Reduction on the LEDs without changing the TV picture.
-- Optional active-area mean, off by default. It averages only the pixels above the measured black level, so a bright object in a mostly black LG region is not diluted by the background.
-- Optional colour statistic per saved profile: `mean` (default), `p50`, `p90` or `peak`, set as `"colorStat"` in the profile. The mean maps a half-black, half-white region onto the same colour as flat grey; a percentile keeps the bright end. Letterbox and bar decisions always use the mean, so changing the statistic never changes what the service decides.
+- Colour statistic per saved profile, cycled with **Colour** in the Spatial profile panel and stored as `"colorStat"`: `Mean` (default), `Active`, `p50`, `p90`, `Peak`. The mean maps a half-black, half-white region onto the same colour as flat grey; `Active` averages only the pixels above the measured black level so a small bright object is not diluted by a large black background; the percentiles keep the bright end. Letterbox and bar detection always use the plain mean, so the setting never changes what the service decides.
 - Original saturation and brightness: colours are passed through, never re-gained.
 - Start, stop, status and persistent boot autostart switch in the TV app.
 - Configurable IPv4/IPv6 receiver and JSON TCP port, optional token authentication, priority 149, 25 to 1000 ms capture interval.
 
 ## Requirements and limits
+
+The TV app keeps each panel short: every setting carries a `?` button that opens one full-screen explanation written in plain language, so the panels fit a single screen and the remote never has to scroll through prose. Back or Close dismisses it and returns focus to the button that opened it.
 
 Tested on a rooted LG G4 with webOS 24, Homebrew Channel and Hyperion 2.0.16 and HyperHDR 22.0.0 tested on the TV. The native service requires root elevation and the TV's existing `libvtcapture`, Luna, GLib and JSON-C libraries. Other TV models or firmware versions have not been validated.
 
@@ -94,17 +95,65 @@ Remote navigation regression tests: `node tests/remote-navigation.test.js`.
 
 ## Optional automatic PicCap handover
 
-Version 0.7.0 adds **Auto PicCap**, disabled by default. The switch is available when PicCap is installed. Keep PicCap's own autostart disabled. From 0.9.0, HyperDRM manages PicCap's receiver address, FlatBuffer port and Unix socket setting when automatic handover is enabled; other capture preferences and the autostart preference are preserved.
+**Auto PicCap** is off by default and available when PicCap is installed. The
+intended setup is Auto PicCap **on** and PicCap's own autostart **off**: HyperDRM
+then owns the capture source and starts and stops PicCap itself. Both services
+need the same exclusive LG capture resource, so exactly one of them can hold it.
 
-When the session is started, the controller polls LG's active media resources. From 0.10.0, three consecutive foreground media-decoder samples over at least two seconds without a Secure Video Path resource allow PicCap to start. HyperDRM releases its histogram capture and clears priority 149 first, allowing PicCap's configured input priority to take over. Any `SVP_CPB` resource selects protected playback immediately. Missing, stale, malformed, idle or HDMI state selects the conservative HyperDRM fallback; an already active PicCap session gets at most 1.5 seconds of unknown-state grace for short playback pauses. Unknown states never start PicCap. PicCap must confirm that it has stopped before histogram capture resumes. Detection is specific to the tested G4 resource model, not a universal DRM-state API.
+PicCap is the better source and runs whenever the TV plays unprotected content.
+HyperDRM watches `com.webos.media/getActivePipelines`; three foreground
+media-decoder replies over two seconds without a Secure Video Path resource start
+PicCap, release the histogram capture and let PicCap feed the receiver at its own
+priority. The app front screen, an idle TV, an HDMI input and a missing or
+malformed reply are *unknown* and simply keep whichever source is already
+running, so a player hiding its decoder for a menu cannot flip the source back and
+forth.
 
-The switch is saved in the own service container and applies after reboot when Autostart is enabled. Stop pauses both managed capture paths until Start. Turning Auto PicCap off stops a PicCap session started by this controller and restores HyperDRM. Avoid starting another capture service independently while automatic handover is active.
+Protected playback is the exception. When the resource list contains `SVP_CPB`,
+PicCap's framebuffer grab is nothing but black frames. HyperDRM asks PicCap to
+stop, waits for the confirmation, captures with the histogram and sends at
+priority 149. When protected playback ends it starts PicCap again after a
+five-second dwell. If the histogram produces nothing for fifteen seconds under
+protected playback, LG is not going to release it for this stream: HyperDRM
+restarts PicCap, says so in the diagnostics line and leaves the capture alone for
+a minute.
 
-The app displays the selected source and PicCap's Hyperion connection status. Histogram region swatches are hidden while PicCap supplies the colors. Playback classification and isolated controller tests are in `native/test_playback.c` and `native/test_handover.c`; link both with `-ldl`.
+Both directions are faded rather than cleared. On the way out, the last histogram
+frame is re-sent with a four-second duration and the receiver connection is held
+open until it expires, while the source bridge keeps the fading colours on the
+receiver until PicCap's own stream produces a frame. On the way back, PicCap's
+colours seed the histogram's continuity buffer, so the first histogram frame
+continues from what the LEDs were already showing.
+
+Starting PicCap needs a settled answer, not one lucky poll, and requests are
+issued before the status poll in each tick: a poll that was already in flight used
+to reject a transition. Manual Stop, turning Auto PicCap off and uninstalling stop
+a PicCap this service started; a PicCap you started yourself is never stopped
+except for a protected-playback takeover, and is restarted afterwards. The switch
+is saved in the own service container and applies after reboot when Autostart is
+enabled.
+
+Two capture services must never initialise VT_CAPTURE in turn: each start revokes
+the other, which left neither with a stable capture. HyperDRM therefore follows
+PicCap instead of competing with it. It polls PicCap's status only while it is
+not itself capturing, schedules no retries while PicCap holds the resource, and
+resumes the moment PicCap stops. The same rule covers a PicCap started by hand
+while Auto PicCap is off.
+
+If a PicCap that HyperDRM is relying on reports its receiver disconnected for five
+seconds, HyperDRM takes the capture back and feeds until PicCap stops or
+reconnects. The switch is saved in the own service container and applies after
+reboot when Autostart is enabled. Stop pauses the histogram output only.
+
+Detection is specific to the tested G4 resource model, not a universal DRM-state
+API. `native/test_playback.c` covers the protected-playback test and
+`native/test_handover.c` the capture controller; link both with `-ldl`.
 
 ## Capture interruption recovery
 
 LG may revoke histogram capture during playback transitions. From 0.7.1, HyperDRM releases capture while leaving its last color update to expire normally after 1.5 seconds, then retries initialization after 200 ms and up to two additional 400 ms intervals. Successful recovery clears this rapid retry budget. Persistent failure returns to the existing five-second retry interval; manual Stop, PicCap handover and shutdown still explicitly clear the own color source. Status exposes `captureRecoveries` and `lastRecoveryMs` for diagnosis.
+
+Recovery is driven by the wish to run, not by the autostart hook: once **Start** has been selected the service keeps retrying every five seconds for as long as the obstacle lasts, and every connection latch that gates recovery carries a deadline so a half-open socket cannot strand the feed.
 
 ## Hyperion and HyperHDR receiver settings
 
@@ -173,7 +222,7 @@ Feature tests are native/test_diagnostics.c, native/test_target.c, native/test_h
 
 ## Capture resilience and live layout (0.10.0)
 
-If managed PicCap reports disconnected for five seconds, HyperDRM requests its stop, waits for confirmed stopped status and resumes histogram output. Reconnection inside that window clears the loss timer. A 30-second cooldown prevents immediate PicCap restart after a connection failure; normal capture transitions have a three-second reentry delay. Manual Stop, disabling handover, changing the receiver and secure playback take precedence over unknown-state grace.
+If a PicCap that holds the capture reports its receiver disconnected for five seconds, HyperDRM takes the capture back and feeds until PicCap stops or reconnects. Reconnection inside that window clears the loss timer. A 30-second cooldown prevents an immediate restart of a PicCap that HyperDRM stopped after a failure. Manual Stop, disabling handover, changing the receiver and the end of protected playback all take precedence.
 
 While a capture session runs, a separate nonblocking authenticated JSON connection checks the LED layout every five seconds. Changed LED count, positions or order replace the validated mapping between frames. Invalid or timed-out responses retain the last good mapping and report a layout error; capture continues. Profile changes cancel obsolete probes. Receiver JSON streaming and the user connection test have independent sockets. HyperHDR continues to apply its own current LED rectangles to the generated color plane.
 

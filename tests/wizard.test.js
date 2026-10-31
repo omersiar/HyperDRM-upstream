@@ -38,11 +38,11 @@ function measure(){
 measure();assert.equal(c.profile,'custom');assert(c.profileDirty);
 const proposal=JSON.parse(elements.customProfile.value);assert.equal(proposal.points.length,16);
 assert.equal(proposal.geometry,'rectangles');assert.equal(proposal.rectangles.length,16);
-assert.equal(proposal.black.length,16);assert.equal(proposal.white.length,16);assert.equal(proposal.compensate,false);assert.equal(proposal.activeMean,false);
-assert(requests.some(r=>r.method==='calibrationDraft'&&r.data.rectangles&&r.data.rectangles.length===16&&r.data.black.length===16&&r.data.white.length===16&&r.data.activeMean===false));assert(!requests.some(r=>r.method==='calibration'));
+assert.equal(proposal.black.length,16);assert.equal(proposal.white.length,16);assert.equal(proposal.compensate,false);assert.equal(proposal.colorStat,'mean');
+assert(requests.some(r=>r.method==='calibrationDraft'&&r.data.rectangles&&r.data.rectangles.length===16&&r.data.black.length===16&&r.data.white.length===16&&r.data.colorStat==='mean'));assert(!requests.some(r=>r.method==='calibration'));
 c.profileDirty=false;globalResponse=true;measure();assert(elements.wizardStatus.textContent.includes('reliable spatial'));assert.equal(elements.customProfile.value,JSON.stringify(proposal,null,2));
-globalResponse=false;c.profileDirty=false;elements.customProfile.value=JSON.stringify({model:'OTHER-TV',points:proposal.points,geometry:'rectangles',activeMean:true,rectangles:[{region:3,x0:0,y0:0,x1:0.5,y1:0.19}]});measure();
-const kept=JSON.parse(elements.customProfile.value);assert.equal(kept.geometry,'rectangles');assert.equal(kept.rectangles.length,16);assert.equal(kept.activeMean,true);assert(elements.wizardStatus.textContent.includes('region rectangles'));
+globalResponse=false;c.profileDirty=false;elements.customProfile.value=JSON.stringify({model:'OTHER-TV',points:proposal.points,geometry:'rectangles',colorStat:'p90',rectangles:[{region:3,x0:0,y0:0,x1:0.5,y1:0.19}]});measure();
+const kept=JSON.parse(elements.customProfile.value);assert.equal(kept.geometry,'rectangles');assert.equal(kept.rectangles.length,16);assert.equal(kept.colorStat,'p90');assert(elements.wizardStatus.textContent.includes('region rectangles'));
 c.profileDirty=false;globalResponse=false;elements.calibrate.onclick();elements.cancelCalibration.onclick();assert(!active && !c.wizard);
 elements.validateCalibration.onclick();assert.equal(elements.calibrationVideo.currentTime,108);elements.calibrationVideo.events.ended();assert(!active && elements.wizardStatus.textContent.includes('Top-left red'));
 elements.calibrate.onclick();let prevented=false;events.keydown({keyCode:461,preventDefault(){prevented=true;}});assert(prevented && !active);

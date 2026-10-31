@@ -1,5 +1,8 @@
 /* Capture scheduler and histogram processing. */
 #define RECOVERY_LATCH_MS 5000
+/* The loop now wakes every few milliseconds, so the gate only needs to absorb
+ * that jitter. A large tolerance was quietly raising the configured rate. */
+#define SAMPLE_TOLERANCE_MS 2
 static int tick(void *unused) {
     (void)unused;
     uint64_t now = milliseconds();
@@ -37,7 +40,7 @@ static int tick(void *unused) {
         receiver_runtime.clear_pending = false;
         receiver_close();
     }
-    if (receiver_runtime.starting && (piccap_owned || capture_source != SOURCE_HISTOGRAM)) {
+    if (receiver_runtime.starting && capture_source != SOURCE_HISTOGRAM) {
         receiver_runtime.starting = false;
         receiver_runtime.starting_since = 0;
         receiver_close();
@@ -86,13 +89,27 @@ static int tick(void *unused) {
     layout_refresh_tick(&playback_json, now, capture_ctx.handle || capture_source == SOURCE_PICCAP,
                         &receiver_layout);
     stream_tick(&playback_json, now, handover_enabled && !retries.paused && !retries.blocked);
-    bool owned = handover_tick();
+    bool owned = handover_tick(capture_ctx.handle != NULL, capture_ctx.last_output_at);
     bridge_tick(now, &capture_ctx);
+    /* The held frame has served its purpose: PicCap is sending, or our own
+     * capture came back. Only then may the connection be dropped. */
+    if (output_hold_until && now >= output_hold_until) {
+        output_hold_until = 0;
+        if (!capture_ctx.handle && handover_yield())
+            receiver_close();
+    }
     if (owned)
         return 1;
     if (!capture_ctx.handle) {
         if (receiver_runtime.starting || receiver_runtime.clear_pending || receiver_closing())
             return 1;
+        /* Another capture service holds VT_CAPTURE. Retrying revokes it, and
+         * revoking each other once a second left neither service with a stable
+         * capture; handover_tick polls it instead and resumes by itself. */
+        if (handover_yield()) {
+            retries.due = 0;
+            return 1;
+        }
         /* Retry because the feed is supposed to be running, not because the
          * autostart hook happens to be installed. A cast app holds VT_CAPTURE
          * for as long as it plays, so a bounded attempt count gave up long
@@ -129,7 +146,12 @@ static int tick(void *unused) {
         capture_ctx.settling = 2;
         return 1;
     }
-    if (capture_ctx.sample_at && now - capture_ctx.sample_at < target_capture_interval(&target))
+    /* Sampling gate. The timer fires every 25 ms, so a gate that demands the
+     * full interval loses the whole slot to a millisecond of jitter: a 25 ms
+     * setting ran at 30 samples/s instead of 40, which is 8 ms of extra latency
+     * on average. The tolerance keeps the configured rate. */
+    if (capture_ctx.sample_at &&
+        now - capture_ctx.sample_at + SAMPLE_TOLERANCE_MS < target_capture_interval(&target))
         return 1;
     Histogram hist[16] = {0};
     uint64_t stage = microseconds();
@@ -201,7 +223,7 @@ static int tick(void *unused) {
         for (int c = 0; c < 3; c++) {
             unsigned threshold = calibration.has_reference ? calibration.black[i][c] : 16;
             double light;
-            if (!CALIBRATION_ACTIVE && calibration.active_mean)
+            if (!CALIBRATION_ACTIVE && calibration.color_stat == CAL_STAT_ACTIVE)
                 light = histogram_active_linear_mean(ordered[i].bins[c], threshold);
             else if (!CALIBRATION_ACTIVE && calibration.color_stat == CAL_STAT_P50)
                 light = histogram_linear_percentile(ordered[i].bins[c], 500);
@@ -231,8 +253,7 @@ static int tick(void *unused) {
         }
     /* Detection reads the mean whatever the display statistic is. Reuse the
      * rendered value when it already is the mean, otherwise compute it. */
-    if (CALIBRATION_ACTIVE ||
-        (calibration.color_stat == CAL_STAT_MEAN && !calibration.active_mean))
+    if (CALIBRATION_ACTIVE || calibration.color_stat == CAL_STAT_MEAN)
         memcpy(capture_ctx.detect_rgb, capture_ctx.rgb, sizeof(capture_ctx.detect_rgb));
     else
         histogram_detection_colors(ordered, capture_ctx.detect_rgb);

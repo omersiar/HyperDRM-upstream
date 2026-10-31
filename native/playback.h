@@ -84,11 +84,15 @@ static inline bool playback_is(PlaybackJson *j, void *o, const char *key, const 
     void *v = playback_field(j, o, key);
     return v && j->type(v) == 6 && strcmp(j->string(v), value) == 0;
 }
-typedef enum { PLAYBACK_UNKNOWN, PLAYBACK_CLEAR, PLAYBACK_PROTECTED } PlaybackProtection;
-/* G4 resource-state classification, not black-frame or app-name guessing.
- * Any active Secure Video Path wins. Only a foreground media decoder without
- * a secure resource is eligible; HDMI, idle and malformed replies are unknown. */
-static inline PlaybackProtection playback_classify(PlaybackJson *j, const char *text) {
+typedef enum { PLAYBACK_UNKNOWN, PLAYBACK_CLEAR, PLAYBACK_PROTECTED } PlaybackState;
+/* LG's G4 resource model, the only playback facts this service acts on.
+ * `protected` means the picture runs through the secure video path, which a
+ * framebuffer grab such as PicCap can only record as black -- the one case where
+ * the histogram is the better source. `clear` means a foreground media decoder
+ * without a secure resource: exactly what PicCap captures best. Everything else
+ * -- idle, HDMI, an empty or malformed reply -- is unknown and must not move the
+ * capture source at all. */
+static inline PlaybackState playback_state(PlaybackJson *j, const char *text) {
     void *root = j->parse(text);
     if (!root)
         return PLAYBACK_UNKNOWN;
@@ -109,8 +113,7 @@ static inline PlaybackProtection playback_classify(PlaybackJson *j, const char *
         }
         bool decoder = false;
         for (size_t k = 0; k < j->length(resources); k++) {
-            void *resource = j->at(resources, k);
-            void *name = playback_field(j, resource, "resource");
+            void *name = playback_field(j, j->at(resources, k), "resource");
             if (!name || j->type(name) != 6) {
                 invalid = true;
                 continue;

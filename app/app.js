@@ -10,7 +10,7 @@ function checkServiceVersion(result) {
     warning.style.display = versionCompatible ? 'none' : 'block';
     document.getElementById('reloadService').style.display = versionCompatible ? 'none' : 'inline-block';
     warning.textContent = versionCompatible ? '' : 'App ' + HYPERDRM_APP_VERSION + ' / service ' + (result.version || 'unknown') + '. The installed service does not match this app. Finish the update, then select Reload service before changing settings. Reloading briefly stops ambient lighting.';
-    ['start', 'autostart', 'handover', 'saveTarget', 'testConnection', 'calibrate', 'validateCalibration', 'saveProfile', 'compensate', 'activeMean'].forEach(function(id) {
+    ['start', 'autostart', 'handover', 'saveTarget', 'testConnection', 'calibrate', 'validateCalibration', 'saveProfile', 'compensate', 'colorStat'].forEach(function(id) {
         var button = document.getElementById(id);
         if (!versionCompatible) {
             button.versionBlocked = true;
@@ -37,8 +37,12 @@ var profileDirty = false,
     profile = 'auto',
     geometry = 'rim',
     compensate = false,
-    activeMean = false,
+    colorStat = 'mean',
     advancedProfile = false;
+/* How a region's pixels become one value. Ordered as the button cycles; the
+ * names match the profile's colorStat key and the service's status reply. */
+var colorStatNames = {mean: 'Mean', active: 'Active', p50: 'p50', p90: 'p90', peak: 'Peak'};
+var colorStatOrder = ['mean', 'active', 'p50', 'p90', 'peak'];
 var profileNames = {
     auto: 'Auto',
     g4: 'LG G4 (measured)',
@@ -57,10 +61,10 @@ function showCompensate() {
     button.disabled = profile !== 'custom';
 }
 
-function showActiveMean() {
-    var button = document.getElementById('activeMean');
+function showColorStat() {
+    var button = document.getElementById('colorStat');
     if (!button) return;
-    button.textContent = 'Ignore black background: ' + (activeMean ? 'On' : 'Off');
+    button.textContent = 'Colour: ' + (colorStatNames[colorStat] || 'Mean');
     button.disabled = profile !== 'custom';
 }
 
@@ -69,7 +73,7 @@ function showProfile() {
     document.getElementById('geometry').textContent = 'Geometry: ' + geometryNames[geometry];
     document.getElementById('geometry').disabled = profile !== 'custom';
     showCompensate();
-    showActiveMean();
+    showColorStat();
     var visible = profile === 'custom' && advancedProfile;
     document.getElementById('customEditor').style.display = visible ? 'block' : 'none';
     document.getElementById('customProfile').disabled = !visible;
@@ -149,15 +153,15 @@ function display(result) {
         else if (result.customRectangles && result.customRectangles.length) stored.geometry = 'rim';
         if (result.customRectangles && result.customRectangles.length) stored.rectangles = result.customRectangles;
         compensate = !!result.customCompensate;
-        activeMean = !!result.customActiveMean;
+        colorStat = colorStatNames[result.colorStat] ? result.colorStat : 'mean';
         stored.compensate = compensate;
-        stored.activeMean = activeMean;
+        stored.colorStat = colorStat;
         if (result.customBlack && result.customBlack.length) stored.black = result.customBlack;
         if (result.customWhite && result.customWhite.length) stored.white = result.customWhite;
         document.getElementById('customProfile').value = JSON.stringify(stored, null, 2);
     }
     showCompensate();
-    showActiveMean();
+    showColorStat();
     if (result.effectiveCalibration) document.getElementById('profileStatus').textContent = 'TV: ' + (result.tvModel || 'Unknown') + ' · Active profile: ' + profileNames[result.effectiveCalibration] + (result.effectiveCalibration === 'custom' ? ' · ' + geometryNames[result.spatialGeometry === 'rectangles' ? 'rectangles' : 'rim'] : '') + (result.effectiveCalibration === 'average' ? ' · Spatial calibration needed for this model' : '');
 
     if (result.host && !targetDirty) {
@@ -171,11 +175,11 @@ function display(result) {
         document.getElementById('output').textContent = 'Output: ' + (output === 'flatbuffer' ? 'FlatBuffer, all instances' : 'JSON, one instance');
     }
     document.getElementById('token').placeholder = result.tokenSet ? 'Saved token (leave blank to keep)' : 'No token saved';
-    if (result.endpoint) document.getElementById('endpoint').textContent = result.receiver + ' · ' + result.endpoint + ' · Priority 149 · 10 updates per second';
+    if (result.endpoint) document.getElementById('endpoint').textContent = result.receiver + ' · ' + result.endpoint + ' · Priority 149' + (result.captureIntervalMs ? ' · ' + result.captureIntervalMs + ' ms capture' : '');
     var t = result.connectionTest;
     if (t) document.getElementById('testResult').textContent = 'Connection test: ' + t.state + (t.state === 'Passed' ? ' · ' + t.ledCount + ' LEDs · ' + t.elapsedMs + ' ms' : '') + (t.error ? ' · ' + t.error : '');
     document.getElementById('testConnection').disabled = !!t && ['Connecting', 'Sending request', 'Checking authentication', 'Reading LED layout'].indexOf(t.state) >= 0;
-    if (result.version) document.getElementById('diagnostics').textContent = 'Version ' + result.version + ' · ' + (result.uid === 0 ? 'Root service' : 'Service needs root elevation') + ' · ' + result.captureState + ' · Playback: ' + result.playbackProtection + ' · Capture recoveries: ' + result.captureRecoveries + ' (last: ' + result.lastRecoveryMs + ' ms)' + (result.lastOutputAgeMs >= 0 ? ' · Last histogram output: ' + result.lastOutputAgeMs + ' ms ago' : '') + (result.retryScheduled ? ' · Retry in ' + result.retryInMs + ' ms · Attempts: ' + result.retryAttempts : '') + (result.piccapError ? ' · ' + result.piccapError : '') + (result.piccapCooldownMs ? ' · PicCap retry in ' + Math.ceil(result.piccapCooldownMs / 1000) + ' s' : '') + ' · Layout updates: ' + (result.layoutUpdates || 0) + (result.layoutError ? ' · Layout: ' + result.layoutError : '');
+    if (result.version) document.getElementById('diagnostics').textContent = 'Version ' + result.version + ' · ' + (result.uid === 0 ? 'Root service' : 'Service needs root elevation') + ' · ' + result.captureState + ' · Capture recoveries: ' + result.captureRecoveries + ' (last: ' + result.lastRecoveryMs + ' ms)' + (result.lastOutputAgeMs >= 0 ? ' · Last histogram output: ' + result.lastOutputAgeMs + ' ms ago' : '') + (result.retryScheduled ? ' · Retry in ' + result.retryInMs + ' ms · Attempts: ' + result.retryAttempts : '') + (result.piccapError ? ' · ' + result.piccapError : '') + (result.piccapCooldownMs ? ' · PicCap retry in ' + Math.ceil(result.piccapCooldownMs / 1000) + ' s' : '') + ' · Layout updates: ' + (result.layoutUpdates || 0) + (result.layoutError ? ' · Layout: ' + result.layoutError : '');
     var handover = document.getElementById('handover');
     handover.disabled = !result.piccapInstalled;
     handover.setAttribute('aria-checked', String(!!result.piccapHandover));
@@ -193,7 +197,7 @@ function display(result) {
         checkServiceVersion(result);
         return;
     }
-    if (result.piccapHandover) document.getElementById('status').textContent += ' · HyperDRM · ' + result.playbackProtection;
+    if (result.piccapHandover) document.getElementById('status').textContent += result.captureHold ? ' · ' + result.captureHold + ' has the capture' : ' · HyperDRM stands in during protected playback';
     if (result.piccapHandover && !result.piccapTargetCompatible) document.getElementById('status').textContent += ' · Auto PicCap unavailable for remote IPv6 target';
     if (result.colorValid && result.effectiveCalibration === 'average') document.getElementById('status').textContent += ' · Average color output';
     if (result.colorValid) document.getElementById('status').textContent += result.spatialOutput ? ' · ' + result.ledCount + ' LEDs from 16 color regions' + (result.receiver === 'HyperHDR' ? ' · Spatial image output' : '') : ' · Output RGB: ' + result.outputColor.join(', ');
@@ -435,7 +439,7 @@ document.getElementById('saveProfile').onclick = function() {
                 data.white = parsed.white;
             }
             data.compensate = parsed.compensate === true || compensate;
-            data.activeMean = parsed.activeMean === true || activeMean;
+            data.colorStat = colorStatNames[parsed.colorStat] ? parsed.colorStat : colorStat;
         } catch (e) {
             showActionError('Custom profile must be valid JSON.');
             return;
@@ -490,9 +494,9 @@ if (compensateButton) compensateButton.onclick = function() {
     }
     showProfile();
 };
-var activeMeanButton = document.getElementById('activeMean');
-if (activeMeanButton) activeMeanButton.onclick = function() {
-    activeMean = !activeMean;
+var colorStatButton = document.getElementById('colorStat');
+if (colorStatButton) colorStatButton.onclick = function() {
+    colorStat = colorStatOrder[(colorStatOrder.indexOf(colorStat) + 1) % colorStatOrder.length];
     profileDirty = true;
     var field = document.getElementById('customProfile'),
         stored = null;
@@ -502,11 +506,16 @@ if (activeMeanButton) activeMeanButton.onclick = function() {
         stored = null;
     }
     if (stored && typeof stored === 'object') {
-        stored.activeMean = activeMean;
+        stored.colorStat = colorStat;
         field.value = JSON.stringify(stored, null, 2);
     }
     showProfile();
 };
-setupRemoteNavigation(['overviewTab', 'receiverTab', 'calibrationTab', 'reloadService', 'grantRoot', 'start', 'stop', 'refresh', 'autostart', 'handover', 'calibrationShortcut', 'receiver', 'output', 'hostField', 'portField', 'piccapPortField', 'captureIntervalField', 'tokenField', 'clearToken', 'saveTarget', 'testConnection', 'calibrate', 'validateCalibration', 'profile', 'saveProfile', 'editProfile', 'geometry', 'compensate', 'activeMean', 'customProfileField', 'cancelCalibration'].map(function(id) {
-    return document.getElementById(id);
-}), document, window);
+/* The remote walks the controls in the order they are drawn, so the list is
+ * taken from the document instead of a hand-kept array. A control added to the
+ * markup joins the cycle in its visual position, help buttons included; hidden
+ * panels, disabled controls and the closed help modal are skipped while a key is
+ * pressed. Keeping this list by hand is what made the remote jump out of order
+ * whenever a control moved. */
+setupRemoteNavigation(Array.prototype.slice.call(
+        document.querySelectorAll('button, .field, input[type="checkbox"]')), document, window);

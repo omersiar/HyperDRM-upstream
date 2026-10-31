@@ -33,6 +33,24 @@ int main(void) {
     assert(histogram_linear_percentile(bins, 1000) == color_light_table()[240]);
     assert(histogram_linear_percentile(bins, 5000) == color_light_table()[240]);
     assert(histogram_linear_percentile(bins, 1) == color_light_table()[10]);
+    /* The `active` statistic ignores the black background: a small bright object
+     * on black reads as the object, where the mean reads as a dim mix and the
+     * percentiles see only the background. */
+    memset(bins, 0, sizeof(bins));
+    bins[0] = 900;
+    bins[230] = 100;
+    unsigned logo_mean = histogram_mean(bins);
+    unsigned logo_active = color_encode(histogram_active_linear_mean(bins, 16));
+    assert(logo_mean < 90);
+    assert(logo_active == 230);
+    assert(histogram_linear_percentile(bins, 500) == color_light_table()[0]);
+    /* Nothing above the threshold falls back to the mean, so a dark region is
+     * never forced to black by the option. */
+    memset(bins, 0, sizeof(bins));
+    bins[3] = 600;
+    bins[5] = 300;
+    bins[8] = 100;
+    assert(color_encode(histogram_active_linear_mean(bins, 16)) == histogram_mean(bins));
     puts("PASS: percentile selection keeps the bright end of the distribution");
     return 0;
 }

@@ -22,17 +22,30 @@ int main(void) {
         assert(output[0][0] == 0);
     }
 
-    /* A real step arrives about two samples after the seed: the median needs one
-     * sample to move, and a jump this large skips the confirm window. */
+    /* A real step is out on the very first sample. It is real light, and the
+     * median's second sample was pure latency. */
     stabilize_reset(&filter);
     memset(input, 0, sizeof(input));
     for (unsigned i = 0; i < 3; i++)
         stabilize_push(&filter, input, output);
     memset(input, 100, sizeof(input));
     stabilize_push(&filter, input, output);
+    assert(output[0][0] == 100);
+
+    /* A mid-sized change -- above the dither band, below a cut -- is out on the
+     * second sample: one sample to confirm it is not a decoder artefact. The
+     * median used to add another, and a second confirmation another after that. */
+    stabilize_reset(&filter);
+    memset(input, 0, sizeof(input));
+    for (unsigned i = 0; i < 3; i++)
+        stabilize_push(&filter, input, output);
+    memset(input, 20, sizeof(input));
+    stabilize_push(&filter, input, output);
     assert(output[0][0] == 0);
     stabilize_push(&filter, input, output);
-    assert(output[0][0] == 100);
+    assert(output[0][0] == 20);
+    stabilize_push(&filter, input, output);
+    assert(output[0][0] == 20);
 
     /* Slow fades are tracked, not frozen. */
     stabilize_reset(&filter);

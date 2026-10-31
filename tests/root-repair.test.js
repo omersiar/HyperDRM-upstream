@@ -13,7 +13,7 @@ class Bridge {
  }
  cancel(){}
 }
-const c={document:{getElementById(id){assert(elements[id],id);return elements[id];},createElement(){return {};}},window:{},PalmServiceBridge:Bridge,setupRemoteNavigation(){},setInterval(){},setTimeout(fn){const id=++next;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);}};
+const c={document:{getElementById(id){assert(elements[id],id);return elements[id];},createElement(){return {};},querySelectorAll(){return [];}},window:{},PalmServiceBridge:Bridge,setupRemoteNavigation(){},setInterval(){},setTimeout(fn){const id=++next;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);}};
 vm.createContext(c);vm.runInContext(fs.readFileSync('app/app.js','utf8'),c);
 function flush(){for(let i=0;timers.size && i<20;i++){const [id,fn]=timers.entries().next().value;timers.delete(id);fn();}assert(!timers.size);}
 assert.equal(elements.grantRoot.style.display,'inline-block');elements.autostart.onclick();flush();

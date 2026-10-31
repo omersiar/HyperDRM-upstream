@@ -53,7 +53,12 @@ static void bridge_tick(uint64_t now, CaptureContext *capture) {
         return;
     }
     if (capture_source != bridge_source) {
-        if (capture_source == SOURCE_PICCAP_STARTING) {
+        /* PicCap is taking over, either because we started it after a takeover
+         * or because it was already capturing and we handed the resource back.
+         * Both transitions fade the last histogram colours into PicCap's own
+         * frames instead of clearing the receiver first. */
+        if (capture_source == SOURCE_PICCAP_STARTING ||
+            (bridge_source == SOURCE_HISTOGRAM && capture_source == SOURCE_PICCAP)) {
             bridge_phase =
                 capture->continuity.available && now - capture->continuity.valid_at < 2000
                     ? BRIDGE_HOLDING

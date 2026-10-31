@@ -6,7 +6,7 @@ class Bridge {
  call(uri){requests.push(uri);this.onservicecallback(JSON.stringify(uri.endsWith('/status')?{returnValue:true,version:serviceVersion,piccapInstalled:false,receiverConnecting:true,connectionTest:{state:'Not tested'}}:{returnValue:true}));}
  cancel(){}
 }
-const c={document:{getElementById(id){assert(elements[id],id);return elements[id];},createElement(){return {style:{}};}},window:{},PalmServiceBridge:Bridge,setupRemoteNavigation(){},setInterval(){},setTimeout(){return 1;},clearTimeout(){}};
+const c={document:{getElementById(id){assert(elements[id],id);return elements[id];},createElement(){return {style:{}};},querySelectorAll(){return [];}},window:{},PalmServiceBridge:Bridge,setupRemoteNavigation(){},setInterval(){},setTimeout(){return 1;},clearTimeout(){}};
 vm.createContext(c);vm.runInContext(fs.readFileSync('app/version.js','utf8'),c);vm.runInContext(fs.readFileSync('app/app.js','utf8'),c);
 assert(!c.versionCompatible && elements.start.disabled && elements.saveTarget.disabled);
 assert(elements.versionWarning.textContent.includes('0.12.0'));assert.equal(elements.reloadService.style.display,'inline-block');

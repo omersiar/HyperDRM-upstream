@@ -128,7 +128,11 @@ function wizardCommit() {
             stored = null;
         }
         measured.compensate = !!(stored && stored.compensate === true);
-        measured.activeMean = !!(stored && stored.activeMean === true);
+        /* Keep whatever colour statistic the profile already used; the wizard
+         * only measures geometry and references, it never chooses a summary.
+         * The list is local so this file does not depend on app.js globals. */
+        var stats = ['mean', 'active', 'p50', 'p90', 'peak'];
+        measured.colorStat = stored && stats.indexOf(stored.colorStat) >= 0 ? stored.colorStat : 'mean';
         if (blackRgb && whiteRgb) {
             measured.black = blackRgb.map(function(rgb) {
                 return rgb.map(function(value) {
@@ -168,7 +172,7 @@ function wizardCommit() {
             black: measured.black,
             white: measured.white,
             compensate: measured.compensate === true,
-            activeMean: measured.activeMean === true
+            colorStat: measured.colorStat
         });
     } catch (e) {
         wizardFinish(e.message);

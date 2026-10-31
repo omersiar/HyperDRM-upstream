@@ -22,17 +22,20 @@ typedef struct {
     unsigned char region;
 } RegionRect;
 /* How the 256 bins of a region/channel become one value. The mean is the
- * default and the only lossless-to-8-bit choice when the picture is uniform;
- * a percentile keeps the bright end of a region that mixes light and dark. */
+ * default; a percentile keeps the bright end of a region that mixes light and
+ * dark, and active averages only the pixels above the black reference so a small
+ * bright object is not diluted by a large dark background. */
 #define CAL_STAT_MEAN 0
 #define CAL_STAT_P50 1
 #define CAL_STAT_P90 2
 #define CAL_STAT_PEAK 3
+#define CAL_STAT_ACTIVE 4
 static inline const char *calibration_stat_key(unsigned stat) {
-    return stat == CAL_STAT_P50    ? "p50"
-           : stat == CAL_STAT_P90  ? "p90"
-           : stat == CAL_STAT_PEAK ? "peak"
-                                   : "mean";
+    return stat == CAL_STAT_P50      ? "p50"
+           : stat == CAL_STAT_P90    ? "p90"
+           : stat == CAL_STAT_PEAK   ? "peak"
+           : stat == CAL_STAT_ACTIVE ? "active"
+                                     : "mean";
 }
 typedef struct {
     CalibrationKind kind;
@@ -46,9 +49,7 @@ typedef struct {
      * Optional: only used when the user enables colour-cast compensation. */
     bool has_reference;
     bool compensate;
-    bool active_mean;
-    /* Colour statistic for the rendered feed. active_mean keeps its own meaning
-     * and takes precedence when it is set. */
+    /* How the rendered feed summarises each region; see CAL_STAT_*. */
     unsigned color_stat;
     unsigned char black[16][3];
     unsigned char white[16][3];
@@ -248,20 +249,27 @@ static inline bool calibration_parse(PlaybackJson *j, const char *text, Calibrat
         if (valid)
             next.compensate = playback_true(j, root, "compensate");
     }
-    void *active_mean = NULL;
-    if (j->type(root) == 4 && j->get(root, "activeMean", &active_mean)) {
-        valid = valid && j->type(active_mean) == 1;
-        if (valid)
-            next.active_mean = playback_true(j, root, "activeMean");
-    }
-    if (playback_is(j, root, "colorStat", "p50"))
+    bool stat_set = false;
+    if (playback_is(j, root, "colorStat", "p50")) {
         next.color_stat = CAL_STAT_P50;
-    else if (playback_is(j, root, "colorStat", "p90"))
+        stat_set = true;
+    } else if (playback_is(j, root, "colorStat", "p90")) {
         next.color_stat = CAL_STAT_P90;
-    else if (playback_is(j, root, "colorStat", "peak"))
+        stat_set = true;
+    } else if (playback_is(j, root, "colorStat", "peak")) {
         next.color_stat = CAL_STAT_PEAK;
-    else if (playback_is(j, root, "colorStat", "mean"))
+        stat_set = true;
+    } else if (playback_is(j, root, "colorStat", "active")) {
+        next.color_stat = CAL_STAT_ACTIVE;
+        stat_set = true;
+    } else if (playback_is(j, root, "colorStat", "mean")) {
         next.color_stat = CAL_STAT_MEAN;
+        stat_set = true;
+    }
+    /* A profile saved before the statistic existed carried ignore-black as its
+     * own flag; it selects the same behaviour. */
+    if (!stat_set && playback_true(j, root, "activeMean"))
+        next.color_stat = CAL_STAT_ACTIVE;
     if (next.kind == CAL_CUSTOM && next.count < 2)
         valid = false;
     j->put(root);
@@ -331,8 +339,6 @@ static inline bool calibration_save(const char *path, const Calibration *value) 
             used += snprintf(data + used, sizeof(data) - used, "]");
         }
     }
-    if (value->active_mean)
-        used += snprintf(data + used, sizeof(data) - used, ",\"activeMean\":true");
     if (value->color_stat)
         used += snprintf(data + used, sizeof(data) - used, ",\"colorStat\":\"%s\"",
                          calibration_stat_key(value->color_stat));

@@ -55,8 +55,9 @@ Each region arrives as 768 counters, and the pipeline reduces them to one 8-bit
 code per channel. That reduction is the only irreversible loss in the path and it
 is a choice: half a screen of black beside half of white has exactly the same mean
 as flat mid-grey. `calibration.color_stat` selects what to keep — `mean` (default),
-`p50`, `p90` or `peak`, via `histogram_linear_percentile()` — while `active_mean`
-keeps precedence for the ignore-black behaviour. A percentile returns the code of
+`active`, `p50`, `p90` or `peak` — where `active` averages only the bins above the
+black reference (via `histogram_active_linear_mean()`, for a small bright object on
+a dark background) and the others use `histogram_linear_percentile()`. A percentile returns the code of
 the chosen bin, so it round-trips through the encode table unchanged. Everything
 downstream is then lossless with respect to those sixteen colours: `edge_feed.h`
 copies a measured colour per cell and never invents one.

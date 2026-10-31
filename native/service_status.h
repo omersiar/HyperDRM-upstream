@@ -46,7 +46,7 @@ static bool status(void *h, void *m, void *ctx) {
     used += snprintf(json + used, sizeof(json) - used, "],\"customRectangleCount\":%u,\"spatialRectangleCount\":%u,"
                                                              "\"customGeometry\":\"%s\","
                      "\"spatialGeometry\":\"%s\",\"customCompensate\":%s,"
-                     "\"customActiveMean\":%s,\"colorStat\":\"%s\",\"customHasReference\":%s,"
+                     "\"colorStat\":\"%s\",\"customHasReference\":%s,"
                      "\"layoutUpdates\":%u,"
                      "\"lastLayoutCheckAgeMs\":%lld,\"layoutError\":\"%s\","
                      "\"piccapFallbacks\":%u,\"piccapCooldownMs\":%llu,",
@@ -54,7 +54,6 @@ static bool status(void *h, void *m, void *ctx) {
                      calibration.rect_geometry ? "rectangles" : "rim",
                      calibration_rectangles() ? "rectangles" : "rim",
                      calibration.compensate ? "true" : "false",
-                     calibration.active_mean ? "true" : "false",
                      calibration_stat_key(calibration.color_stat),
                      calibration.has_reference ? "true" : "false", layout_updates,
                      last_layout_check ? (long long)(now - last_layout_check) : -1, layout_error,
@@ -92,8 +91,8 @@ static bool status(void *h, void *m, void *ctx) {
                          calibration_ctx.draft.rects[i].x1, calibration_ctx.draft.rects[i].y1);
     used += snprintf(json + used, sizeof(json) - used, "],\"compensate\":%s",
                      calibration_ctx.draft.compensate ? "true" : "false");
-    used += snprintf(json + used, sizeof(json) - used, ",\"activeMean\":%s",
-                     calibration_ctx.draft.active_mean ? "true" : "false");
+    used += snprintf(json + used, sizeof(json) - used, ",\"colorStat\":\"%s\"",
+                     calibration_stat_key(calibration_ctx.draft.color_stat));
     if (calibration_ctx.draft.has_reference) {
         used += snprintf(json + used, sizeof(json) - used, ",\"black\":[");
         for (unsigned i = 0; i < 16 && used + 24 < (int)sizeof(json); i++)
@@ -129,7 +128,7 @@ static bool status(void *h, void *m, void *ctx) {
                  (unsigned long long)(retries.due > now ? retries.due - now : 0),
                  capture_source == SOURCE_PICCAP_STARTING   ? "Starting PicCap"
                  : capture_source == SOURCE_PICCAP_STOPPING ? "Stopping PicCap"
-                 : piccap_owned                             ? "PicCap"
+                 : capture_source != SOURCE_HISTOGRAM       ? "PicCap"
                  : capture_ctx.handle                       ? "Histogram"
                                                             : "Stopped",
                  piccap_error);
@@ -174,7 +173,8 @@ static bool status(void *h, void *m, void *ctx) {
              "\"spatialInterpolation\":%s,\"blackBarDetection\":true,\"autostart\":%s,"
              "\"retryScheduled\":%s,\"retryPaused\":%s,\"retryBlocked\":%s,\"retryAttempts\":%u,"
              "\"piccapInstalled\":%s,\"piccapHandover\":%s,\"piccapConnected\":%s,\"activeSource\":"
-             "\"%s\",\"playbackProtection\":\"%s\",\"letterboxDetected\":%s,"
+             "\"%s\",\"captureHold\":\"%s\",\"playback\":\"%s\","
+             "\"playbackReplyAgeMs\":%lld,\"letterboxDetected\":%s,"
              /* Requested versus actual feed cadence, and where a slow tick goes:
               * vtGet is LG's histogram read, render is plane build, send is the
               * socket write. A feed that feels late shows up here first. */
@@ -186,10 +186,12 @@ static bool status(void *h, void *m, void *ctx) {
              retries.paused ? "true" : "false", retries.blocked ? "true" : "false",
              retries.attempts, piccap_installed() ? "true" : "false",
              handover_enabled ? "true" : "false", piccap_connected ? "true" : "false",
-             piccap_owned ? "PicCap" : "HyperDRM",
-             protection == PLAYBACK_PROTECTED ? "protected"
-             : protection == PLAYBACK_CLEAR   ? "non-secure decoder"
-                                              : "unknown",
+             handover_yield() ? "PicCap" : "HyperDRM",
+             piccap_running ? "PicCap" : "",
+             playback == PLAYBACK_PROTECTED ? "protected"
+             : playback == PLAYBACK_CLEAR   ? "clear"
+                                            : "unknown",
+             playback_at ? (long long)(now - playback_at) : -1,
              capture_ctx.handle && capture_ctx.letterbox_mode ? "true" : "false",
              capture_ctx.wanted ? "true" : "false", capture_ctx.recovery_attempts,
              capture_ctx.vt_get_us / 1000, capture_ctx.plane_us / 1000,

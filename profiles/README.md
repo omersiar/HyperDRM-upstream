@@ -70,7 +70,7 @@ region. The profile stores them next to the rim anchors:
   ],
   "geometry": "rectangles",
   "compensate": false,
-  "activeMean": false,
+  "colorStat": "mean",
   "rectangles": [
     {"region": 15, "x0": 0.0, "y0": 0.41, "x1": 0.19, "y1": 0.79},
     {"region": 4, "x0": 0.19, "y0": 0.3, "x1": 0.38, "y1": 0.82}
@@ -107,12 +107,17 @@ region. The profile stores them next to the rim anchors:
   the matching reference, which neutralises a Warm picture mode or Eye
   Comfort/Blue Light Reduction on the LEDs. Calibration itself always samples
   raw values.
-- `activeMean` (off by default) averages only the bins above the measured black
-  level, renormalising the remaining counts. It reduces black-background
-  dilution without changing channel ratios. A 12-level codec-noise floor and a
-  squared fade keep near-black dither from switching the estimate between
-  darkness and the lit object, which caused visible flicker in large regions.
-  Calibration bypasses it.
+- `colorStat` selects how a region's 256 bins become one value, and is one of
+  `mean` (default), `active`, `p50`, `p90` or `peak`. `active` averages only the
+  bins above the measured black level, renormalising the remaining counts, so a
+  small bright object is not diluted by a large dark background; it changes which
+  pixels are counted, never their ratios. A 12-level codec-noise floor keeps
+  near-black dither from switching the estimate between darkness and the lit
+  object. A percentile returns the code of the chosen bin unchanged, so it
+  round-trips through the encode table exactly. Calibration always samples the raw
+  mean, and letterbox/bar detection always uses the plain mean whatever this is set
+  to. Profiles written before this key existed used `"activeMean": true` for the
+  same behaviour and are still read correctly.
 - The profile JSON limit is 8 KiB, enough for 16 points, 16 rectangles and the
   32 reference triplets.
 

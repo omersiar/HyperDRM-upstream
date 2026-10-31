@@ -20,7 +20,7 @@ static bool start(void *h, void *m, void *ctx) {
         retry_reset(&retries);
     /* The user asked for a feed, so recovery continues until they stop it. */
     capture_ctx.wanted = true;
-    if (piccap_owned)
+    if (capture_source == SOURCE_YIELDED || capture_source == SOURCE_PICCAP)
         return respond(h, m, "{\"returnValue\":true,\"running\":true,\"activeSource\":\"PicCap\"}");
     if (capture_ctx.handle)
         return respond(h, m, "{\"returnValue\":true,\"running\":true}");
@@ -153,10 +153,26 @@ static bool handover(void *h, void *m, void *ctx) {
             h, m,
             "{\"returnValue\":false,\"errorText\":\"Could not save PicCap handover preference\"}");
     handover_enabled = enabled;
-    protection = PLAYBACK_UNKNOWN;
+    playback = PLAYBACK_UNKNOWN;
+    playback_at = 0;
     clear_samples = 0;
-    clear_since = unknown_since = 0;
+    clear_since = histogram_since = 0;
     next_media_probe = 0;
+    next_piccap_probe = 0;
+    if (!enabled) {
+        if (piccap_owned) {
+            /* We started it, so we stop it; the histogram resumes. */
+            capture_source = SOURCE_PICCAP_STOPPING;
+            piccap_restore = false;
+        } else if (piccap_restore) {
+            /* We interrupted the user's PicCap for a takeover; hand it back. */
+            piccap_target = target;
+            piccap_restore = false;
+            release_capture_hold(milliseconds());
+            capture_source = SOURCE_PICCAP_STARTING;
+            piccap_request(3);
+        }
+    }
     return respond(h, m, "{\"returnValue\":true}");
 }
 static bool settings(void *h, void *m, void *ctx) {
@@ -169,7 +185,7 @@ static bool settings(void *h, void *m, void *ctx) {
     if (!target_save(TARGET_PREF, &next))
         return respond(
             h, m, "{\"returnValue\":false,\"errorText\":\"Could not save receiver settings\"}");
-    bool active = capture_ctx.handle || receiver_runtime.starting || piccap_owned || retries.due;
+    bool active = capture_ctx.handle || receiver_runtime.starting || retries.due;
     stop_capture();
     stream_close(milliseconds());
     bridge_phase = BRIDGE_IDLE;
@@ -178,9 +194,11 @@ static bool settings(void *h, void *m, void *ctx) {
     connection_test.stage = TEST_IDLE;
     target = next;
     last_error[0] = 0;
-    protection = PLAYBACK_UNKNOWN;
+    /* A playback report belongs to the old receiver; ask again. */
+    playback = PLAYBACK_UNKNOWN;
+    playback_at = 0;
     clear_samples = 0;
-    clear_since = unknown_since = 0;
+    clear_since = histogram_since = 0;
     if (active && !retries.paused && !retries.blocked)
         retries.due = milliseconds();
     return respond(h, m, "{\"returnValue\":true}");
